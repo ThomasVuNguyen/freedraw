@@ -233,7 +233,7 @@ export function useCollaboration(excalidrawAPI) {
     }
   }, [excalidrawAPI, isLoaded])
 
-  return { isLoaded }
+  return { isLoaded, userId: userIdRef.current }
 }
 
 // Generate a random color for each user

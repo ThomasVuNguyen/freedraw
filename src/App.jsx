@@ -16,7 +16,7 @@ function App() {
   const [zenMode, setZenMode] = useState(false)
 
   // Enable real-time collaboration
-  const { isLoaded } = useCollaboration(excalidrawAPI)
+  const { isLoaded, userId } = useCollaboration(excalidrawAPI)
 
   const handleResetScene = useCallback(() => {
     excalidrawRef.current?.resetScene()
@@ -66,6 +66,12 @@ function App() {
         {!isLoaded && (
           <div className="loading-overlay">
             <div className="loading-message">Loading shared canvas...</div>
+          </div>
+        )}
+        {userId && (
+          <div className="user-id-display">
+            <span className="user-id-label">Browser ID:</span>
+            <span className="user-id-value">{userId}</span>
           </div>
         )}
         <Excalidraw

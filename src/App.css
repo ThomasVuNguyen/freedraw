@@ -119,3 +119,37 @@
     opacity: 1;
   }
 }
+
+.user-id-display {
+  position: absolute;
+  bottom: 1rem;
+  right: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.75rem 1rem;
+  background: var(--toolbar-background);
+  border: 1px solid var(--toolbar-border);
+  border-radius: 8px;
+  backdrop-filter: blur(18px);
+  z-index: 50;
+  font-size: 0.85rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.user-id-label {
+  font-weight: 600;
+  color: var(--app-foreground);
+  opacity: 0.6;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.user-id-value {
+  font-family: 'Courier New', monospace;
+  color: var(--app-foreground);
+  font-size: 0.8rem;
+  font-weight: 500;
+  word-break: break-all;
+}
