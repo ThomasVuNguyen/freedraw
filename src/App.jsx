@@ -4,7 +4,7 @@ import '@excalidraw/excalidraw/index.css'
 
 import './App.css'
 import { useCollaboration } from './useCollaboration'
-import { handleImageUpload, dataURLToBlob } from './imageHandler'
+import { handleImageUpload } from './imageHandler'
 
 const APP_NAME = 'Infinite Canvas Studio'
 
@@ -21,8 +21,29 @@ function App() {
   const { isLoaded, userIdentity } = useCollaboration(excalidrawAPI, pendingFilesRef)
 
   const handleResetScene = useCallback(() => {
-    excalidrawRef.current?.resetScene()
-  }, [])
+    if (!excalidrawAPI || !userIdentity) {
+      return
+    }
+
+    const currentElements = excalidrawAPI.getSceneElements()
+    if (!currentElements.length) {
+      return
+    }
+
+    const retainedElements = currentElements.filter((element) => {
+      const owner = element.customData?.createdBy
+      if (!owner) {
+        return true
+      }
+      return owner !== userIdentity.browserId
+    })
+
+    if (retainedElements.length === currentElements.length) {
+      return
+    }
+
+    excalidrawAPI.updateScene({ elements: retainedElements })
+  }, [excalidrawAPI, userIdentity])
 
   const handleThemeToggle = useCallback(() => {
     setTheme((current) => (current === 'light' ? 'dark' : 'light'))
@@ -152,8 +173,12 @@ function App() {
           <button type="button" onClick={handleZenToggle}>
             {zenMode ? 'Exit Zen' : 'Enter Zen'}
           </button>
-          <button type="button" onClick={handleResetScene}>
-            Clear Canvas
+          <button
+            type="button"
+            onClick={handleResetScene}
+            disabled={!userIdentity || !excalidrawAPI}
+          >
+            Clear My Items
           </button>
         </div>
       </header>

@@ -1,19 +1,51 @@
 import { useEffect, useRef, useState } from 'react'
-import { ref, set, onValue, onDisconnect } from 'firebase/database'
+import { onDisconnect, onValue, push, ref, serverTimestamp, set, update } from 'firebase/database'
 import { database } from './firebase'
 import { getOrCreateUserIdentity } from './userIdentity'
 
 const CANVAS_PATH = 'canvas/scene'
 const PRESENCE_PATH = 'presence/users'
+const SESSIONS_PATH = 'sessions'
+const HEARTBEAT_INTERVAL = 20000
+
+const cloneElement = (element) => {
+  if (typeof structuredClone === 'function') {
+    return structuredClone(element)
+  }
+  return JSON.parse(JSON.stringify(element))
+}
+
+const cloneElements = (elements = []) => elements.map((el) => cloneElement(el))
 
 export function useCollaboration(excalidrawAPI, pendingFilesRef) {
   const [isLoaded, setIsLoaded] = useState(false)
   const [userIdentity, setUserIdentity] = useState(null)
+  const [onlineUsers, setOnlineUsers] = useState([])
   const userIdRef = useRef(null)
   const isSyncingRef = useRef(false)
   const lastUpdateRef = useRef(null)
   const hasLoadedInitialDataRef = useRef(false)
   const previousSceneRef = useRef(null)
+  const sessionRefRef = useRef(null)
+  const heartbeatRef = useRef(null)
+
+  useEffect(() => {
+    const presenceListRef = ref(database, PRESENCE_PATH)
+    const unsubscribePresence = onValue(presenceListRef, (snapshot) => {
+      const presenceData = snapshot.val() || {}
+      const users = Object.values(presenceData).filter(Boolean)
+      users.sort((a, b) => {
+        const aJoined = a.joinedAt || 0
+        const bJoined = b.joinedAt || 0
+        return bJoined - aJoined
+      })
+      setOnlineUsers(users)
+    })
+
+    return () => {
+      unsubscribePresence()
+    }
+  }, [])
 
   useEffect(() => {
     if (!excalidrawAPI) return
@@ -95,7 +127,7 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
           excalidrawAPI.updateScene(updateData)
 
           // Store this as the previous scene for ownership tracking
-          previousSceneRef.current = sceneData.elements
+          previousSceneRef.current = cloneElements(sceneData.elements)
 
           // Reset syncing flag after a brief delay
           setTimeout(() => {
@@ -124,17 +156,93 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
 
     // Listen for local changes and sync to Firebase
     const handleChange = (elements, appState) => {
-      // Don't sync if we haven't loaded initial data yet
       if (!hasLoadedInitialDataRef.current) {
         return
       }
 
-      // Don't sync if we're currently loading from Firebase
       if (isSyncingRef.current) {
         return
       }
 
-      // Debounce updates
+      const previousElements = previousSceneRef.current || []
+      const previousMap = new Map()
+      previousElements.forEach((el, index) => {
+        previousMap.set(el.id, { element: el, index })
+      })
+
+      const authorizedElements = []
+      const seenIds = new Set()
+      let hasUnauthorizedChange = false
+
+      for (let index = 0; index < elements.length; index += 1) {
+        const element = elements[index]
+        const clonedElement = cloneElement(element)
+        seenIds.add(element.id)
+
+        const prevEntry = previousMap.get(element.id)
+
+        if (!prevEntry) {
+          // New element - add ownership immediately
+          clonedElement.customData = {
+            ...clonedElement.customData,
+            createdBy: userId,
+          }
+          authorizedElements[index] = clonedElement
+          continue
+        }
+
+        const previousElement = prevEntry.element
+        const owner = previousElement.customData?.createdBy
+
+        if (!owner || owner === userId) {
+          clonedElement.customData = {
+            ...clonedElement.customData,
+            createdBy: owner ?? userId,
+          }
+          authorizedElements[index] = clonedElement
+          continue
+        }
+
+        const wasModified = JSON.stringify(previousElement) !== JSON.stringify(element)
+
+        if (wasModified) {
+          console.log(`Blocked modification to element ${element.id} owned by ${owner}`)
+          authorizedElements[index] = cloneElement(previousElement)
+          hasUnauthorizedChange = true
+        } else {
+          authorizedElements[index] = cloneElement(previousElement)
+        }
+      }
+
+      for (const previousElement of previousElements) {
+        if (seenIds.has(previousElement.id)) {
+          continue
+        }
+
+        const owner = previousElement.customData?.createdBy
+        if (owner && owner !== userId) {
+          console.log(`Blocked deletion of element ${previousElement.id} owned by ${owner}`)
+          const insertIndex = previousMap.get(previousElement.id)?.index ?? authorizedElements.length
+          authorizedElements.splice(insertIndex, 0, cloneElement(previousElement))
+          hasUnauthorizedChange = true
+        }
+      }
+
+      previousSceneRef.current = cloneElements(authorizedElements)
+
+      if (hasUnauthorizedChange) {
+        isSyncingRef.current = true
+        excalidrawAPI.updateScene({ elements: authorizedElements })
+        const releaseSyncFlag = () => {
+          isSyncingRef.current = false
+        }
+        if (typeof requestAnimationFrame === 'function') {
+          requestAnimationFrame(releaseSyncFlag)
+        } else {
+          setTimeout(releaseSyncFlag, 0)
+        }
+      }
+
       if (lastUpdateRef.current) {
         clearTimeout(lastUpdateRef.current)
       }
@@ -142,97 +250,21 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
       lastUpdateRef.current = setTimeout(() => {
         isSyncingRef.current = true
 
-        // Get the current scene
-        let sceneElements = excalidrawAPI.getSceneElements()
-        const previousElements = previousSceneRef.current || []
-
-        // Create a map of previous elements by ID for quick lookup
-        const previousMap = new Map(previousElements.map((el) => [el.id, el]))
-        const currentMap = new Map(sceneElements.map((el) => [el.id, el]))
-
-        // Check for unauthorized changes and add ownership to new elements
-        const authorizedElements = []
-        let hasUnauthorizedChange = false
-
-        for (const element of sceneElements) {
-          const previousElement = previousMap.get(element.id)
-
-          if (!previousElement) {
-            // New element - add ownership
-            const ownedElement = {
-              ...element,
-              customData: {
-                ...element.customData,
-                createdBy: userId,
-              },
-            }
-            authorizedElements.push(ownedElement)
-          } else {
-            // Existing element - check if it was modified
-            const owner = previousElement.customData?.createdBy
-
-            if (!owner || owner === userId) {
-              // User owns this element or no owner (legacy), allow changes
-              authorizedElements.push(element)
-            } else {
-              // Element is owned by someone else
-              // Check if it was actually modified
-              const wasModified = JSON.stringify(previousElement) !== JSON.stringify(element)
-
-              if (wasModified) {
-                // Unauthorized modification - revert to previous state
-                console.log(`Blocked modification to element ${element.id} owned by ${owner}`)
-                authorizedElements.push(previousElement)
-                hasUnauthorizedChange = true
-              } else {
-                // No change, keep as is
-                authorizedElements.push(element)
-              }
-            }
-          }
-        }
-
-        // Check for deleted elements - only allow deleting own elements
-        for (const previousElement of previousElements) {
-          if (!currentMap.has(previousElement.id)) {
-            const owner = previousElement.customData?.createdBy
-
-            if (owner && owner !== userId) {
-              // Someone else's element was deleted - restore it
-              console.log(`Blocked deletion of element ${previousElement.id} owned by ${owner}`)
-              authorizedElements.push(previousElement)
-              hasUnauthorizedChange = true
-            }
-          }
-        }
-
-        // If there were unauthorized changes, update the local canvas
-        if (hasUnauthorizedChange) {
-          excalidrawAPI.updateScene({ elements: authorizedElements })
-        }
-
-        // Update our tracking of the previous scene
-        previousSceneRef.current = authorizedElements
-
-        // Create scene object
+        const sceneElements = (previousSceneRef.current && cloneElements(previousSceneRef.current)) || cloneElements(excalidrawAPI.getSceneElements())
         const sceneData = {
-          elements: authorizedElements,
+          elements: sceneElements,
           appState: {
             viewBackgroundColor: appState.viewBackgroundColor,
             gridSize: appState.gridSize,
           },
         }
 
-        // Get the files (images) from Excalidraw
         const files = excalidrawAPI.getFiles()
-
-        // Merge with pending files (uploaded images that haven't been added via Excalidraw's API)
         const allFiles = {
           ...files,
           ...(pendingFilesRef?.current || {}),
         }
 
-        // Serialize to JSON string to preserve exact structure
         const sceneJSON = JSON.stringify(sceneData)
         const filesJSON = JSON.stringify(allFiles)
 
