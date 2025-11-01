@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Excalidraw } from '@excalidraw/excalidraw'
 import '@excalidraw/excalidraw/index.css'
 
@@ -11,14 +11,14 @@ const APP_NAME = 'Infinite Canvas Studio'
 function App() {
   const excalidrawRef = useRef(null)
   const [excalidrawAPI, setExcalidrawAPI] = useState(null)
-  const [theme, setTheme] = useState('light')
+  const [theme, setTheme] = useState('dark')
   const [gridMode, setGridMode] = useState(false)
   const [viewMode, setViewMode] = useState(false)
   const [zenMode, setZenMode] = useState(false)
   const pendingFilesRef = useRef({})
 
   // Enable real-time collaboration
-  const { isLoaded, userIdentity } = useCollaboration(excalidrawAPI, pendingFilesRef)
+  const { isLoaded, userIdentity, onlineUsers } = useCollaboration(excalidrawAPI, pendingFilesRef)
 
   const handleResetScene = useCallback(() => {
     if (!excalidrawAPI || !userIdentity) {
@@ -60,6 +60,25 @@ function App() {
   const handleZenToggle = useCallback(() => {
     setZenMode((current) => !current)
   }, [])
+
+  useEffect(() => {
+    if (!excalidrawAPI || !userIdentity?.color) {
+      return
+    }
+
+    const currentAppState = excalidrawAPI.getAppState()
+
+    if (currentAppState?.currentItemStrokeColor === userIdentity.color) {
+      return
+    }
+
+    const nextAppState = {
+      ...currentAppState,
+      currentItemStrokeColor: userIdentity.color,
+    }
+
+    excalidrawAPI.updateScene({ appState: nextAppState })
+  }, [excalidrawAPI, userIdentity])
 
   // Handle image paste/upload - upload to Firebase Storage
   const handlePaste = useCallback(
@@ -155,10 +174,34 @@ function App() {
     [excalidrawAPI, userIdentity]
   )
 
+  const visibleOnlineUsers = onlineUsers.slice(0, 5)
+  const overflowCount = Math.max(onlineUsers.length - visibleOnlineUsers.length, 0)
+
   return (
     <div className={`app app-${theme}`}>
       <header className="toolbar">
         <h1>{APP_NAME}</h1>
+
+        <div className="online-indicator" aria-live="polite">
+          <span className="online-dot" />
+          <span className="online-count">
+            {onlineUsers.length} {onlineUsers.length === 1 ? 'person online' : 'people online'}
+          </span>
+          <div className="online-avatars" role="list">
+            {visibleOnlineUsers.map((user) => (
+              <span
+                role="listitem"
+                key={user.id}
+                className="online-avatar"
+                style={{ backgroundColor: user.color }}
+                title={user.username}
+              >
+                {user.username?.charAt(0)?.toUpperCase() ?? '?'}
+              </span>
+            ))}
+            {overflowCount > 0 && <span className="online-more">+{overflowCount}</span>}
+          </div>
+        </div>
 
         <div className="toolbar-controls">
           <button type="button" onClick={handleThemeToggle}>
@@ -217,6 +260,8 @@ function App() {
           initialData={{
             appState: {
               name: APP_NAME,
+              currentItemStrokeColor: userIdentity?.color || '#4ECDC4',
+              currentItemBackgroundColor: 'transparent',
             },
           }}
         />
