@@ -11,13 +11,19 @@ export function useCollaboration(excalidrawAPI) {
   const isSyncingRef = useRef(false)
   const lastUpdateRef = useRef(null)
   const hasLoadedInitialDataRef = useRef(false)
+  const previousSceneRef = useRef(null)
 
   useEffect(() => {
     if (!excalidrawAPI) return
 
-    // Generate unique user ID
+    // Get or create persistent user ID from localStorage
     if (!userIdRef.current) {
-      userIdRef.current = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+      let userId = localStorage.getItem('freedraw_userId')
+      if (!userId) {
+        userId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+        localStorage.setItem('freedraw_userId', userId)
+      }
+      userIdRef.current = userId
     }
 
     const userId = userIdRef.current
@@ -54,6 +60,9 @@ export function useCollaboration(excalidrawAPI) {
 
           // Load the scene from Firebase
           excalidrawAPI.updateScene(sceneData)
+
+          // Store this as the previous scene for ownership tracking
+          previousSceneRef.current = sceneData.elements
 
           // Reset syncing flag after a brief delay
           setTimeout(() => {
@@ -101,11 +110,80 @@ export function useCollaboration(excalidrawAPI) {
         isSyncingRef.current = true
 
         // Get the current scene
-        const sceneElements = excalidrawAPI.getSceneElements()
+        let sceneElements = excalidrawAPI.getSceneElements()
+        const previousElements = previousSceneRef.current || []
+
+        // Create a map of previous elements by ID for quick lookup
+        const previousMap = new Map(previousElements.map((el) => [el.id, el]))
+        const currentMap = new Map(sceneElements.map((el) => [el.id, el]))
+
+        // Check for unauthorized changes and add ownership to new elements
+        const authorizedElements = []
+        let hasUnauthorizedChange = false
+
+        for (const element of sceneElements) {
+          const previousElement = previousMap.get(element.id)
+
+          if (!previousElement) {
+            // New element - add ownership
+            const ownedElement = {
+              ...element,
+              customData: {
+                ...element.customData,
+                createdBy: userId,
+              },
+            }
+            authorizedElements.push(ownedElement)
+          } else {
+            // Existing element - check if it was modified
+            const owner = previousElement.customData?.createdBy
+
+            if (!owner || owner === userId) {
+              // User owns this element or no owner (legacy), allow changes
+              authorizedElements.push(element)
+            } else {
+              // Element is owned by someone else
+              // Check if it was actually modified
+              const wasModified = JSON.stringify(previousElement) !== JSON.stringify(element)
+
+              if (wasModified) {
+                // Unauthorized modification - revert to previous state
+                console.log(`Blocked modification to element ${element.id} owned by ${owner}`)
+                authorizedElements.push(previousElement)
+                hasUnauthorizedChange = true
+              } else {
+                // No change, keep as is
+                authorizedElements.push(element)
+              }
+            }
+          }
+        }
+
+        // Check for deleted elements - only allow deleting own elements
+        for (const previousElement of previousElements) {
+          if (!currentMap.has(previousElement.id)) {
+            const owner = previousElement.customData?.createdBy
+
+            if (owner && owner !== userId) {
+              // Someone else's element was deleted - restore it
+              console.log(`Blocked deletion of element ${previousElement.id} owned by ${owner}`)
+              authorizedElements.push(previousElement)
+              hasUnauthorizedChange = true
+            }
+          }
+        }
+
+        // If there were unauthorized changes, update the local canvas
+        if (hasUnauthorizedChange) {
+          excalidrawAPI.updateScene({ elements: authorizedElements })
+        }
+
+        // Update our tracking of the previous scene
+        previousSceneRef.current = authorizedElements
 
         // Create scene object
         const sceneData = {
-          elements: sceneElements,
+          elements: authorizedElements,
           appState: {
             viewBackgroundColor: appState.viewBackgroundColor,
             gridSize: appState.gridSize,
