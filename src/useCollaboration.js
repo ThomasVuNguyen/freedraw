@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { ref, set, onValue, onDisconnect } from 'firebase/database'
 import { database } from './firebase'
+import { getOrCreateUserIdentity } from './userIdentity'
 
 const CANVAS_PATH = 'canvas/scene'
 const PRESENCE_PATH = 'presence/users'
 
 export function useCollaboration(excalidrawAPI) {
   const [isLoaded, setIsLoaded] = useState(false)
+  const [userIdentity, setUserIdentity] = useState(null)
   const userIdRef = useRef(null)
   const isSyncingRef = useRef(false)
   const lastUpdateRef = useRef(null)
@@ -16,31 +18,35 @@ export function useCollaboration(excalidrawAPI) {
   useEffect(() => {
     if (!excalidrawAPI) return
 
-    // Get or create persistent user ID from localStorage
-    if (!userIdRef.current) {
-      let userId = localStorage.getItem('freedraw_userId')
-      if (!userId) {
-        userId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-        localStorage.setItem('freedraw_userId', userId)
-      }
-      userIdRef.current = userId
+    // Initialize user identity
+    const initializeIdentity = async () => {
+      // Get or create user identity with username and color from API
+      const identity = await getOrCreateUserIdentity()
+      userIdRef.current = identity.browserId
+      setUserIdentity(identity)
+
+      return identity
     }
 
-    const userId = userIdRef.current
-    const canvasRef = ref(database, CANVAS_PATH)
-    const presenceRef = ref(database, `${PRESENCE_PATH}/${userId}`)
+    // Main initialization function
+    const initialize = async () => {
+      const identity = await initializeIdentity()
+      const userId = identity.browserId
+      const canvasRef = ref(database, CANVAS_PATH)
+      const presenceRef = ref(database, `${PRESENCE_PATH}/${userId}`)
 
-    // Set up presence
-    const setupPresence = () => {
-      const userPresence = {
-        id: userId,
-        joinedAt: Date.now(),
-        color: generateUserColor(),
+      // Set up presence
+      const setupPresence = () => {
+        const userPresence = {
+          id: userId,
+          username: identity.username,
+          color: identity.color,
+          joinedAt: Date.now(),
+        }
+
+        set(presenceRef, userPresence)
+        onDisconnect(presenceRef).remove()
       }
-
-      set(presenceRef, userPresence)
-      onDisconnect(presenceRef).remove()
-    }
 
     // Listen for canvas changes from Firebase
     const unsubscribeCanvas = onValue(canvasRef, (snapshot) => {
@@ -217,42 +223,32 @@ export function useCollaboration(excalidrawAPI) {
       }, 300)
     }
 
-    setupPresence()
-    const unsubscribeChange = excalidrawAPI.onChange(handleChange)
+      setupPresence()
+      const unsubscribeChange = excalidrawAPI.onChange(handleChange)
 
-    // Cleanup
+      // Cleanup
+      return () => {
+        if (lastUpdateRef.current) {
+          clearTimeout(lastUpdateRef.current)
+        }
+        unsubscribeCanvas()
+        if (unsubscribeChange) {
+          unsubscribeChange()
+        }
+        set(presenceRef, null)
+      }
+    }
+
+    // Call the initialize function and handle cleanup
+    let cleanup
+    initialize().then((cleanupFn) => {
+      cleanup = cleanupFn
+    })
+
     return () => {
-      if (lastUpdateRef.current) {
-        clearTimeout(lastUpdateRef.current)
-      }
-      unsubscribeCanvas()
-      if (unsubscribeChange) {
-        unsubscribeChange()
-      }
-      set(presenceRef, null)
+      if (cleanup) cleanup()
     }
   }, [excalidrawAPI, isLoaded])
 
-  return { isLoaded, userId: userIdRef.current }
-}
-
-// Generate a random color for each user
-function generateUserColor() {
-  const colors = [
-    '#FF6B6B',
-    '#4ECDC4',
-    '#45B7D1',
-    '#FFA07A',
-    '#98D8C8',
-    '#F7B731',
-    '#5F27CD',
-    '#00D2D3',
-    '#FF9FF3',
-    '#54A0FF',
-    '#48DBFB',
-    '#1DD1A1',
-    '#F368E0',
-    '#FF9F43',
-  ]
-  return colors[Math.floor(Math.random() * colors.length)]
+  return { isLoaded, userIdentity }
 }
