@@ -49,8 +49,16 @@ export function useCollaboration(excalidrawAPI) {
             elementCount: sceneData.elements?.length || 0,
           })
 
+          // Set syncing flag to prevent this update from triggering a save
+          isSyncingRef.current = true
+
           // Load the scene from Firebase
           excalidrawAPI.updateScene(sceneData)
+
+          // Reset syncing flag after a brief delay
+          setTimeout(() => {
+            isSyncingRef.current = false
+          }, 500)
 
           if (!isLoaded) {
             setIsLoaded(true)
@@ -60,6 +68,7 @@ export function useCollaboration(excalidrawAPI) {
         } catch (error) {
           console.error('Error loading canvas from Firebase:', error)
           hasLoadedInitialDataRef.current = true
+          isSyncingRef.current = false
         }
       } else if (!data) {
         // No data in Firebase yet, mark as loaded
@@ -75,6 +84,11 @@ export function useCollaboration(excalidrawAPI) {
     const handleChange = (elements, appState) => {
       // Don't sync if we haven't loaded initial data yet
       if (!hasLoadedInitialDataRef.current) {
+        return
+      }
+
+      // Don't sync if we're currently loading from Firebase
+      if (isSyncingRef.current) {
         return
       }
 
