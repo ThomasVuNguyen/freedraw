@@ -6,7 +6,7 @@ import { getOrCreateUserIdentity } from './userIdentity'
 const CANVAS_PATH = 'canvas/scene'
 const PRESENCE_PATH = 'presence/users'
 
-export function useCollaboration(excalidrawAPI) {
+export function useCollaboration(excalidrawAPI, pendingFilesRef) {
   const [isLoaded, setIsLoaded] = useState(false)
   const [userIdentity, setUserIdentity] = useState(null)
   const userIdRef = useRef(null)
@@ -59,13 +59,40 @@ export function useCollaboration(excalidrawAPI) {
 
           console.log('Loading from Firebase:', {
             elementCount: sceneData.elements?.length || 0,
+            fileCount: data.files ? Object.keys(JSON.parse(data.files)).length : 0,
           })
 
           // Set syncing flag to prevent this update from triggering a save
           isSyncingRef.current = true
 
-          // Load the scene from Firebase
-          excalidrawAPI.updateScene(sceneData)
+          // Load files if they exist in the data
+          let filesToLoad = null
+          if (data.files) {
+            try {
+              const files = JSON.parse(data.files)
+              if (Object.keys(files).length > 0) {
+                filesToLoad = files
+                // Also store in pending ref for subsequent syncs
+                if (pendingFilesRef) {
+                  pendingFilesRef.current = {
+                    ...pendingFilesRef.current,
+                    ...files,
+                  }
+                }
+                console.log('Files loaded from Firebase:', Object.keys(files).length)
+              }
+            } catch (error) {
+              console.error('Error parsing files:', error)
+            }
+          }
+
+          // Load the scene from Firebase with files
+          // Pass files directly to updateScene to bypass addFiles and Pica
+          const updateData = filesToLoad
+            ? { ...sceneData, files: filesToLoad }
+            : sceneData
+
+          excalidrawAPI.updateScene(updateData)
 
           // Store this as the previous scene for ownership tracking
           previousSceneRef.current = sceneData.elements
@@ -196,17 +223,29 @@ export function useCollaboration(excalidrawAPI) {
           },
         }
 
+        // Get the files (images) from Excalidraw
+        const files = excalidrawAPI.getFiles()
+
+        // Merge with pending files (uploaded images that haven't been added via Excalidraw's API)
+        const allFiles = {
+          ...files,
+          ...(pendingFilesRef?.current || {}),
+        }
+
         // Serialize to JSON string to preserve exact structure
         const sceneJSON = JSON.stringify(sceneData)
+        const filesJSON = JSON.stringify(allFiles)
 
         const canvasData = {
           sceneJSON,
+          files: filesJSON,
           updatedBy: userId,
           updatedAt: Date.now(),
         }
 
         console.log('Saving to Firebase:', {
           elementCount: sceneData.elements.length,
+          fileCount: Object.keys(allFiles).length,
           sizeKB: (sceneJSON.length / 1024).toFixed(2),
         })
 

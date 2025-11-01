@@ -1,0 +1,16 @@
+rules_version = '2';
+
+// Firebase Storage Security Rules
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Allow anyone to read images (for collaborative viewing)
+    match /images/{allPaths=**} {
+      allow read: if true;
+
+      // Allow authenticated writes (any browser can upload)
+      // In production, you might want to add size limits and file type validation
+      allow write: if request.resource.size < 10 * 1024 * 1024 // 10MB max
+                   && request.resource.contentType.matches('image/.*');
+    }
+  }
+}
