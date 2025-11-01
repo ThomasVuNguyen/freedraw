@@ -88,3 +88,34 @@
 .canvas-area .excalidraw .excalidraw-container {
   height: 100%;
 }
+
+.loading-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--app-background);
+  z-index: 100;
+}
+
+.loading-message {
+  font-size: 1.1rem;
+  font-weight: 500;
+  color: var(--app-foreground);
+  opacity: 0.7;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+}

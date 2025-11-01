@@ -3,15 +3,20 @@ import { Excalidraw } from '@excalidraw/excalidraw'
 import '@excalidraw/excalidraw/index.css'
 
 import './App.css'
+import { useCollaboration } from './useCollaboration'
 
 const APP_NAME = 'Infinite Canvas Studio'
 
 function App() {
   const excalidrawRef = useRef(null)
+  const [excalidrawAPI, setExcalidrawAPI] = useState(null)
   const [theme, setTheme] = useState('light')
   const [gridMode, setGridMode] = useState(false)
   const [viewMode, setViewMode] = useState(false)
   const [zenMode, setZenMode] = useState(false)
+
+  // Enable real-time collaboration
+  const { isLoaded } = useCollaboration(excalidrawAPI)
 
   const handleResetScene = useCallback(() => {
     excalidrawRef.current?.resetScene()
@@ -58,8 +63,14 @@ function App() {
       </header>
 
       <main className="canvas-area">
+        {!isLoaded && (
+          <div className="loading-overlay">
+            <div className="loading-message">Loading shared canvas...</div>
+          </div>
+        )}
         <Excalidraw
           ref={excalidrawRef}
+          excalidrawAPI={setExcalidrawAPI}
           theme={theme}
           viewModeEnabled={viewMode}
           zenModeEnabled={zenMode}
