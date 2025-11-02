@@ -187,13 +187,36 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
               }
             }
 
+            // If there's a pending save (user just pasted/created something),
+            // merge Firebase elements with local elements that don't exist in Firebase yet
+            let elementsToRender = sceneData.elements
+            if (lastUpdateRef.current) {
+              // Get current elements from the canvas (includes pastes that haven't been processed yet)
+              const currentCanvasElements = excalidrawAPI.getSceneElements()
+              const firebaseIds = new Set(sceneData.elements.map(el => el.id))
+              const localOnlyElements = currentCanvasElements.filter(el => !firebaseIds.has(el.id))
+
+              if (localOnlyElements.length > 0) {
+                console.log(`Preserving ${localOnlyElements.length} local element(s) during Firebase sync`)
+                // Add createdBy metadata to local elements
+                const taggedLocalElements = localOnlyElements.map(el => cloneElement({
+                  ...el,
+                  customData: {
+                    ...el.customData,
+                    createdBy: userId,
+                  }
+                }))
+                elementsToRender = [...sceneData.elements, ...taggedLocalElements]
+              }
+            }
+
             const updateData = filesToLoad
-              ? { ...sceneData, files: filesToLoad }
-              : sceneData
+              ? { elements: elementsToRender, appState: sceneData.appState, files: filesToLoad }
+              : { elements: elementsToRender, appState: sceneData.appState }
 
             excalidrawAPI.updateScene(updateData)
 
-            previousSceneRef.current = cloneElements(sceneData.elements)
+            previousSceneRef.current = cloneElements(elementsToRender)
 
             setTimeout(() => {
               isSyncingRef.current = false

@@ -153,13 +153,15 @@ function App() {
               }
 
               // Register the uploaded asset with Excalidraw so it can render immediately
-              const existingFiles = excalidrawAPI.getFiles()
               const newFile = {
                 id: uploadedImage.id,
                 dataURL: uploadedImage.dataURL,
                 mimeType: uploadedImage.mimeType,
                 created: uploadedImage.created,
+                lastRetrieved: Date.now(),
               }
+
+              excalidrawAPI.addFiles([newFile])
 
               const currentElements = excalidrawAPI.getSceneElements()
 
@@ -167,10 +169,6 @@ function App() {
               // The file will be synced via Firebase collaboration using pendingFilesRef
               excalidrawAPI.updateScene({
                 elements: [...currentElements, imageElement],
-                files: {
-                  ...existingFiles,
-                  [uploadedImage.id]: newFile,
-                },
               })
 
               console.log('Image element added to canvas, file stored for sync')
