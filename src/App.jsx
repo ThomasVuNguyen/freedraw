@@ -6,7 +6,10 @@ import './App.css'
 import { useCollaboration } from './useCollaboration'
 import { handleImageUpload } from './imageHandler'
 
-const APP_NAME = 'Infinite Canvas Studio'
+const APP_NAME = 'Arcadia'
+
+// Version info injected at build time
+const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev'
 
 function App() {
   const excalidrawRef = useRef(null)
@@ -193,7 +196,12 @@ function App() {
   return (
     <div className={`app app-${theme}`}>
       <header className="toolbar">
-        <h1>{APP_NAME}</h1>
+        <h1>
+          {APP_NAME}
+          <span className="version-info">
+            v{APP_VERSION}
+          </span>
+        </h1>
 
         <div className="online-indicator" aria-live="polite">
           <span className="online-dot" />
