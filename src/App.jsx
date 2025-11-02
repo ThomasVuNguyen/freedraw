@@ -18,7 +18,10 @@ function App() {
   const pendingFilesRef = useRef({})
 
   // Enable real-time collaboration
-  const { isLoaded, userIdentity, onlineUsers } = useCollaboration(excalidrawAPI, pendingFilesRef)
+  const { isLoaded, userIdentity, onlineUsers, isAdmin } = useCollaboration(
+    excalidrawAPI,
+    pendingFilesRef
+  )
 
   const handleResetScene = useCallback(() => {
     if (!excalidrawAPI || !userIdentity) {
@@ -149,13 +152,25 @@ function App() {
                 created: uploadedImage.created,
               }
 
-              // Get current scene
+              // Register the uploaded asset with Excalidraw so it can render immediately
+              const existingFiles = excalidrawAPI.getFiles()
+              const newFile = {
+                id: uploadedImage.id,
+                dataURL: uploadedImage.dataURL,
+                mimeType: uploadedImage.mimeType,
+                created: uploadedImage.created,
+              }
+
               const currentElements = excalidrawAPI.getSceneElements()
 
-              // Add the element to the scene
+              // Inject the uploaded file and new element into the scene
               // The file will be synced via Firebase collaboration using pendingFilesRef
               excalidrawAPI.updateScene({
                 elements: [...currentElements, imageElement],
+                files: {
+                  ...existingFiles,
+                  [uploadedImage.id]: newFile,
+                },
               })
 
               console.log('Image element added to canvas, file stored for sync')
@@ -223,6 +238,9 @@ function App() {
           >
             Clear My Items
           </button>
+          <a href="/analytics" className="analytics-link">
+            📊 Analytics
+          </a>
         </div>
       </header>
 
@@ -241,6 +259,7 @@ function App() {
             >
               {userIdentity.username}
             </span>
+            {isAdmin && <span className="user-role-badge">Admin</span>}
           </div>
         )}
         <Excalidraw
@@ -251,6 +270,7 @@ function App() {
           zenModeEnabled={zenMode}
           gridModeEnabled={gridMode}
           onPaste={handlePaste}
+          validateEmbeddable={() => true}
           UIOptions={{
             canvasActions: {
               toggleTheme: false,

@@ -6,6 +6,7 @@ import { getOrCreateUserIdentity } from './userIdentity'
 const CANVAS_PATH = 'canvas/scene'
 const PRESENCE_PATH = 'presence/users'
 const SESSIONS_PATH = 'sessions'
+const ADMIN_PATH = 'roles/admins'
 const HEARTBEAT_INTERVAL = 20000
 
 const cloneElement = (element) => {
@@ -21,6 +22,7 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
   const [isLoaded, setIsLoaded] = useState(false)
   const [userIdentity, setUserIdentity] = useState(null)
   const [onlineUsers, setOnlineUsers] = useState([])
+  const [isAdmin, setIsAdmin] = useState(false)
   const userIdRef = useRef(null)
   const isSyncingRef = useRef(false)
   const lastUpdateRef = useRef(null)
@@ -28,6 +30,8 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
   const previousSceneRef = useRef(null)
   const sessionRefRef = useRef(null)
   const heartbeatRef = useRef(null)
+  const isAdminRef = useRef(false)
+  const adminMapRef = useRef({})
 
   useEffect(() => {
     const presenceListRef = ref(database, PRESENCE_PATH)
@@ -46,6 +50,33 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
       unsubscribePresence()
     }
   }, [])
+
+  useEffect(() => {
+    const adminsRef = ref(database, ADMIN_PATH)
+    const unsubscribeAdmins = onValue(adminsRef, (snapshot) => {
+      const adminMap = snapshot.val() || {}
+      adminMapRef.current = adminMap
+      const userId = userIdRef.current
+      const hasAdminRights = Boolean(userId && adminMap[userId])
+      if (isAdminRef.current !== hasAdminRights) {
+        isAdminRef.current = hasAdminRights
+        setIsAdmin(hasAdminRights)
+      }
+    })
+
+    return () => {
+      unsubscribeAdmins()
+    }
+  }, [])
+
+  useEffect(() => {
+    const userId = userIdentity?.browserId
+    const hasAdminRights = Boolean(userId && adminMapRef.current[userId])
+    if (isAdminRef.current !== hasAdminRights) {
+      isAdminRef.current = hasAdminRights
+      setIsAdmin(hasAdminRights)
+    }
+  }, [userIdentity])
 
   useEffect(() => {
     if (!excalidrawAPI) return
@@ -205,6 +236,7 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
         const authorizedElements = []
         const seenIds = new Set()
         let hasUnauthorizedChange = false
+        const userIsAdmin = isAdminRef.current
 
         for (let index = 0; index < elements.length; index += 1) {
           const element = elements[index]
@@ -225,7 +257,7 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
           const previousElement = prevEntry.element
           const owner = previousElement.customData?.createdBy
 
-          if (!owner || owner === userId) {
+          if (userIsAdmin || !owner || owner === userId) {
             clonedElement.customData = {
               ...clonedElement.customData,
               createdBy: owner ?? userId,
@@ -251,7 +283,7 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
           }
 
           const owner = previousElement.customData?.createdBy
-          if (owner && owner !== userId) {
+          if (!userIsAdmin && owner && owner !== userId) {
             console.log(`Blocked deletion of element ${previousElement.id} owned by ${owner}`)
             const insertIndex = previousMap.get(previousElement.id)?.index ?? authorizedElements.length
             authorizedElements.splice(insertIndex, 0, cloneElement(previousElement))
@@ -369,5 +401,5 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
     }
   }, [excalidrawAPI, isLoaded])
 
-  return { isLoaded, userIdentity, onlineUsers }
+  return { isLoaded, userIdentity, onlineUsers, isAdmin }
 }

@@ -104,7 +104,8 @@
   padding: 0.2rem 0.5rem;
 }
 
-.toolbar button {
+.toolbar button,
+.analytics-link {
   border: 1px solid var(--toolbar-border);
   background: transparent;
   color: inherit;
@@ -114,10 +115,16 @@
   font-weight: 500;
   cursor: pointer;
   transition: background 120ms ease, border-color 120ms ease;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
 }
 
 .toolbar button:hover,
-.toolbar button:focus-visible {
+.toolbar button:focus-visible,
+.analytics-link:hover,
+.analytics-link:focus-visible {
   background: rgba(98, 129, 250, 0.14);
   border-color: rgba(98, 129, 250, 0.5);
   outline: none;
@@ -190,6 +197,19 @@
   z-index: 50;
   font-size: 0.85rem;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.user-role-badge {
+  align-self: flex-start;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  background: rgba(98, 129, 250, 0.2);
+  border: 1px solid rgba(98, 129, 250, 0.4);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--app-foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
 .user-id-label {
