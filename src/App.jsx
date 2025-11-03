@@ -12,6 +12,7 @@ import {
   ArrowsOutSimple,
   Broom,
   ChartLineUp,
+  MagnifyingGlass,
 } from '@phosphor-icons/react'
 import '@excalidraw/excalidraw/index.css'
 
@@ -43,6 +44,7 @@ function App() {
     offsetLeft: 0,
     offsetTop: 0,
   })
+  const [isSearchOpen, setIsSearchOpen] = useState(false)
 
   // Enable real-time collaboration
   const { isLoaded, userIdentity, onlineUsers, isAdmin, updateCursorPosition } = useCollaboration(
@@ -223,6 +225,18 @@ function App() {
   const visibleOnlineUsers = onlineUsers.slice(0, 5)
   const overflowCount = Math.max(onlineCount - visibleOnlineUsers.length, 0)
 
+  const handleSearchToggle = useCallback(() => {
+    if (!excalidrawAPI) {
+      return
+    }
+    const open = excalidrawAPI.getAppState()?.openSidebar?.tab === 'search'
+    excalidrawAPI.updateScene({
+      appState: {
+        openSidebar: open ? null : { name: 'default', tab: 'search' },
+      },
+    })
+  }, [excalidrawAPI])
+
   useEffect(() => {
     if (!excalidrawAPI) {
       return undefined
@@ -255,6 +269,23 @@ function App() {
           zoom: zoomValue,
         }
       })
+    })
+
+    return () => {
+      if (typeof unsubscribe === 'function') {
+        unsubscribe()
+      }
+    }
+  }, [excalidrawAPI])
+
+  useEffect(() => {
+    if (!excalidrawAPI) {
+      return undefined
+    }
+
+    const unsubscribe = excalidrawAPI.onChange((_, appState) => {
+      const open = appState.openSidebar?.tab === 'search'
+      setIsSearchOpen((prev) => (prev === open ? prev : open))
     })
 
     return () => {
@@ -588,6 +619,15 @@ function App() {
         </div>
 
         <div className="toolbar-controls">
+          <button
+            type="button"
+            className={`icon-button ${isSearchOpen ? 'icon-button--active' : ''}`}
+            onClick={handleSearchToggle}
+            aria-label={isSearchOpen ? 'Close Search' : 'Search Canvas'}
+            title={isSearchOpen ? 'Close Search' : 'Search Canvas'}
+          >
+            <MagnifyingGlass size={20} weight={isSearchOpen ? 'fill' : 'regular'} />
+          </button>
           <button
             type="button"
             className="icon-button"

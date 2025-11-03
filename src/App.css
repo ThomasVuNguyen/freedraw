@@ -199,6 +199,11 @@
   height: 1.4rem;
 }
 
+.toolbar .icon-button--active {
+  background: rgba(98, 129, 250, 0.18);
+  border-color: rgba(98, 129, 250, 0.5);
+}
+
 .toolbar button:hover,
 .toolbar button:focus-visible,
 .analytics-link:hover,
@@ -389,4 +394,13 @@
 
 .canvas-area .excalidraw .zoom-actions {
   display: none;
+}
+
+.canvas-area .excalidraw .LayerUI__button.library-button {
+  display: none;
+}
+
+.canvas-area .excalidraw button[aria-label*="Library"],
+.canvas-area .excalidraw button[title*="Library"] {
+  display: none !important;
 }
