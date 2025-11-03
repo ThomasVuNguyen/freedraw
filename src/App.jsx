@@ -1,3 +1,5 @@
+/* global __APP_VERSION__ */
+
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Excalidraw } from '@excalidraw/excalidraw'
 import '@excalidraw/excalidraw/index.css'
@@ -19,6 +21,8 @@ function App() {
   const [viewMode, setViewMode] = useState(false)
   const [zenMode, setZenMode] = useState(false)
   const pendingFilesRef = useRef({})
+  const hoverInfoRef = useRef(null)
+  const [hoveredOwner, setHoveredOwner] = useState(null)
 
   // Enable real-time collaboration
   const { isLoaded, userIdentity, onlineUsers, isAdmin } = useCollaboration(
@@ -145,6 +149,11 @@ function App() {
                 fileId: uploadedImage.id,
                 scale: [1, 1],
                 status: 'saved',
+                customData: {
+                  createdBy: userIdentity.browserId,
+                  createdByUsername: userIdentity.username,
+                  createdByColor: userIdentity.color,
+                },
               }
 
               // Store the file in pending files ref for collaboration sync
@@ -192,6 +201,171 @@ function App() {
 
   const visibleOnlineUsers = onlineUsers.slice(0, 5)
   const overflowCount = Math.max(onlineUsers.length - visibleOnlineUsers.length, 0)
+
+  useEffect(() => {
+    if (!excalidrawAPI || typeof window === 'undefined') {
+      return
+    }
+
+    const clearHoverInfo = () => {
+      hoverInfoRef.current = null
+      setHoveredOwner(null)
+    }
+
+    const handlePointerMove = (event) => {
+      const appState = excalidrawAPI.getAppState()
+      if (!appState) {
+        clearHoverInfo()
+        return
+      }
+
+      if (appState.cursorButton === 'down') {
+        clearHoverInfo()
+        return
+      }
+
+      const { offsetLeft = 0, offsetTop = 0, width = 0, height = 0 } = appState
+      const viewportX = event.clientX - offsetLeft
+      const viewportY = event.clientY - offsetTop
+
+      if (viewportX < 0 || viewportY < 0 || viewportX > width || viewportY > height) {
+        clearHoverInfo()
+        return
+      }
+
+      const zoom = appState.zoom?.value ?? 1
+      const sceneX = viewportX / zoom - (appState.scrollX ?? 0)
+      const sceneY = viewportY / zoom - (appState.scrollY ?? 0)
+
+      const elements = excalidrawAPI.getSceneElements().filter(
+        (element) => !element.isDeleted && element.type !== 'selection'
+      )
+
+      const getElementBounds = (element) => {
+        const angle = element.angle || 0
+
+        const calculateRotatedPoint = (pointX, pointY, centerX, centerY) => {
+          const cosAngle = Math.cos(angle)
+          const sinAngle = Math.sin(angle)
+          const translatedX = pointX - centerX
+          const translatedY = pointY - centerY
+
+          return {
+            x: translatedX * cosAngle - translatedY * sinAngle + centerX,
+            y: translatedX * sinAngle + translatedY * cosAngle + centerY,
+          }
+        }
+
+        const corners = [
+          { x: element.x, y: element.y },
+          { x: element.x + element.width, y: element.y },
+          { x: element.x + element.width, y: element.y + element.height },
+          { x: element.x, y: element.y + element.height },
+        ]
+
+        const centerX = element.x + element.width / 2
+        const centerY = element.y + element.height / 2
+
+        const rotatedCorners =
+          angle === 0
+            ? corners
+            : corners.map(({ x, y }) => calculateRotatedPoint(x, y, centerX, centerY))
+
+        const xs = rotatedCorners.map((corner) => corner.x)
+        const ys = rotatedCorners.map((corner) => corner.y)
+
+        const margin =
+          Math.max(8 / zoom, (element.strokeWidth || 1) / zoom) +
+          (element.type === 'arrow' || element.type === 'line' ? 4 / zoom : 0)
+
+        return {
+          minX: Math.min(...xs) - margin,
+          maxX: Math.max(...xs) + margin,
+          minY: Math.min(...ys) - margin,
+          maxY: Math.max(...ys) + margin,
+        }
+      }
+
+      let hoveredElement = null
+      for (let index = elements.length - 1; index >= 0; index -= 1) {
+        const element = elements[index]
+
+        if (!element) {
+          continue
+        }
+
+        const bounds = getElementBounds(element)
+
+        if (
+          sceneX >= bounds.minX &&
+          sceneX <= bounds.maxX &&
+          sceneY >= bounds.minY &&
+          sceneY <= bounds.maxY
+        ) {
+          hoveredElement = element
+          break
+        }
+      }
+
+      if (!hoveredElement) {
+        clearHoverInfo()
+        return
+      }
+
+      const customData = hoveredElement.customData || {}
+      const ownerId = customData.createdBy
+      const presenceOwner = onlineUsers.find((user) => user.id === ownerId)
+      const ownerName =
+        customData.createdByUsername ||
+        presenceOwner?.username ||
+        (ownerId ? `User ${ownerId.substring(0, 6)}` : 'Unknown owner')
+      const ownerColor =
+        customData.createdByColor || presenceOwner?.color || '#4ECDC4'
+
+      const offset = 16
+      const maxWidth = 220
+      const maxHeight = 72
+      const targetX = Math.min(event.clientX + offset, window.innerWidth - maxWidth)
+      const targetY = Math.min(event.clientY + offset, window.innerHeight - maxHeight)
+
+      const nextHoverInfo = {
+        elementId: hoveredElement.id,
+        ownerId,
+        ownerName,
+        ownerColor,
+        position: { x: targetX, y: targetY },
+      }
+
+      hoverInfoRef.current = nextHoverInfo
+      setHoveredOwner((prev) => {
+        if (
+          prev &&
+          prev.elementId === nextHoverInfo.elementId &&
+          prev.ownerName === nextHoverInfo.ownerName &&
+          prev.ownerColor === nextHoverInfo.ownerColor &&
+          Math.abs(prev.position.x - nextHoverInfo.position.x) < 1 &&
+          Math.abs(prev.position.y - nextHoverInfo.position.y) < 1
+        ) {
+          return prev
+        }
+        return nextHoverInfo
+      })
+    }
+
+    const handlePointerDown = () => {
+      clearHoverInfo()
+    }
+
+    window.addEventListener('pointermove', handlePointerMove, { passive: true })
+    window.addEventListener('pointerdown', handlePointerDown, { passive: true })
+    window.addEventListener('pointerleave', clearHoverInfo, { passive: true })
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerdown', handlePointerDown)
+      window.removeEventListener('pointerleave', clearHoverInfo)
+    }
+  }, [excalidrawAPI, onlineUsers])
 
   return (
     <div className={`app app-${theme}`}>
@@ -292,6 +466,24 @@ function App() {
           }}
         />
       </main>
+      {hoveredOwner && (
+        <div
+          className="element-owner-tooltip"
+          style={{
+            top: hoveredOwner.position.y,
+            left: hoveredOwner.position.x,
+          }}
+        >
+          <span
+            className="owner-tooltip-dot"
+            style={{ backgroundColor: hoveredOwner.ownerColor }}
+          />
+          <div className="owner-tooltip-text">
+            <span className="owner-tooltip-label">Owned by</span>
+            <span className="owner-tooltip-value">{hoveredOwner.ownerName}</span>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

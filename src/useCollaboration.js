@@ -99,6 +99,32 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
       const presenceRef = ref(database, `${PRESENCE_PATH}/${userId}`)
       const sessionsListRef = ref(database, `${SESSIONS_PATH}/${userId}`)
 
+      const assignOwnerMetadata = (element, ownerId = userId) => {
+        const existingCustomData = { ...(element.customData || {}) }
+        const metadata = {
+          ...existingCustomData,
+          createdBy: ownerId,
+        }
+
+        if (ownerId === userId) {
+          metadata.createdByUsername = identity.username
+          metadata.createdByColor = identity.color
+        } else {
+          if (existingCustomData.createdByUsername) {
+            metadata.createdByUsername = existingCustomData.createdByUsername
+          }
+          if (existingCustomData.createdByColor) {
+            metadata.createdByColor = existingCustomData.createdByColor
+          }
+        }
+
+        element.customData = metadata
+        return element
+      }
+
+      const decorateElementWithOwner = (element, ownerId = userId) =>
+        assignOwnerMetadata(cloneElement(element), ownerId)
+
       const setupPresence = () => {
         const userPresence = {
           id: userId,
@@ -199,13 +225,9 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
               if (localOnlyElements.length > 0) {
                 console.log(`Preserving ${localOnlyElements.length} local element(s) during Firebase sync`)
                 // Add createdBy metadata to local elements
-                const taggedLocalElements = localOnlyElements.map(el => cloneElement({
-                  ...el,
-                  customData: {
-                    ...el.customData,
-                    createdBy: userId,
-                  }
-                }))
+                const taggedLocalElements = localOnlyElements.map(el =>
+                  decorateElementWithOwner(el)
+                )
                 elementsToRender = [...sceneData.elements, ...taggedLocalElements]
               }
             }
@@ -269,10 +291,7 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
           const prevEntry = previousMap.get(element.id)
 
           if (!prevEntry) {
-            clonedElement.customData = {
-              ...clonedElement.customData,
-              createdBy: userId,
-            }
+            assignOwnerMetadata(clonedElement, userId)
             authorizedElements[index] = clonedElement
             continue
           }
@@ -281,10 +300,7 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
           const owner = previousElement.customData?.createdBy
 
           if (userIsAdmin || !owner || owner === userId) {
-            clonedElement.customData = {
-              ...clonedElement.customData,
-              createdBy: owner ?? userId,
-            }
+            assignOwnerMetadata(clonedElement, owner ?? userId)
             authorizedElements[index] = clonedElement
             continue
           }
