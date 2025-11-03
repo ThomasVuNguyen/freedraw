@@ -8,9 +8,6 @@ import {
   GridFour,
   Eye,
   EyeSlash,
-  ArrowsInSimple,
-  ArrowsOutSimple,
-  Broom,
   ChartLineUp,
   MagnifyingGlass,
 } from '@phosphor-icons/react'
@@ -31,7 +28,7 @@ function App() {
   const [theme, setTheme] = useState('dark')
   const [gridMode, setGridMode] = useState(false)
   const [viewMode, setViewMode] = useState(false)
-  const [zenMode, setZenMode] = useState(false)
+  const [zenMode] = useState(true)
   const pendingFilesRef = useRef({})
   const hoverInfoRef = useRef(null)
   const lastCursorUpdateRef = useRef(0)
@@ -87,10 +84,6 @@ function App() {
 
   const handleViewToggle = useCallback(() => {
     setViewMode((current) => !current)
-  }, [])
-
-  const handleZenToggle = useCallback(() => {
-    setZenMode((current) => !current)
   }, [])
 
   useEffect(() => {
@@ -655,6 +648,7 @@ function App() {
           >
             {viewMode ? <EyeSlash size={20} weight="fill" /> : <Eye size={20} weight="regular" />}
           </button>
+          {/*
           <button
             type="button"
             className="icon-button"
@@ -664,6 +658,8 @@ function App() {
           >
             {zenMode ? <ArrowsOutSimple size={20} weight="fill" /> : <ArrowsInSimple size={20} weight="regular" />}
           </button>
+          */}
+          {/*
           <button
             type="button"
             className="icon-button"
@@ -674,6 +670,7 @@ function App() {
           >
             <Broom size={20} weight="regular" />
           </button>
+          */}
           <a
             href="/analytics"
             className="analytics-link icon-link"
