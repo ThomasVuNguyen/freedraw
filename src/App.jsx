@@ -2,6 +2,17 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Excalidraw } from '@excalidraw/excalidraw'
+import {
+  MoonStars,
+  Sun,
+  GridFour,
+  Eye,
+  EyeSlash,
+  ArrowsInSimple,
+  ArrowsOutSimple,
+  Broom,
+  ChartLineUp,
+} from '@phosphor-icons/react'
 import '@excalidraw/excalidraw/index.css'
 
 import './App.css'
@@ -22,10 +33,19 @@ function App() {
   const [zenMode, setZenMode] = useState(false)
   const pendingFilesRef = useRef({})
   const hoverInfoRef = useRef(null)
+  const lastCursorUpdateRef = useRef(0)
+  const lastSentCursorRef = useRef({ x: null, y: null })
   const [hoveredOwner, setHoveredOwner] = useState(null)
+  const [viewportState, setViewportState] = useState({
+    scrollX: 0,
+    scrollY: 0,
+    zoom: 1,
+    offsetLeft: 0,
+    offsetTop: 0,
+  })
 
   // Enable real-time collaboration
-  const { isLoaded, userIdentity, onlineUsers, isAdmin } = useCollaboration(
+  const { isLoaded, userIdentity, onlineUsers, isAdmin, updateCursorPosition } = useCollaboration(
     excalidrawAPI,
     pendingFilesRef
   )
@@ -199,8 +219,83 @@ function App() {
     [excalidrawAPI, userIdentity]
   )
 
+  const onlineCount = onlineUsers.length
   const visibleOnlineUsers = onlineUsers.slice(0, 5)
-  const overflowCount = Math.max(onlineUsers.length - visibleOnlineUsers.length, 0)
+  const overflowCount = Math.max(onlineCount - visibleOnlineUsers.length, 0)
+
+  useEffect(() => {
+    if (!excalidrawAPI) {
+      return undefined
+    }
+
+    const initialState = excalidrawAPI.getAppState()
+    if (initialState) {
+      setViewportState((prev) => ({
+        ...prev,
+        scrollX: initialState.scrollX ?? 0,
+        scrollY: initialState.scrollY ?? 0,
+        zoom: initialState.zoom?.value ?? initialState.zoom ?? 1,
+        offsetLeft: initialState.offsetLeft ?? 0,
+        offsetTop: initialState.offsetTop ?? 0,
+      }))
+    }
+
+    const unsubscribe = excalidrawAPI.onScrollChange((scrollX, scrollY, zoom) => {
+      const zoomValue =
+        typeof zoom === 'number' ? zoom : typeof zoom?.value === 'number' ? zoom.value : 1
+
+      setViewportState((prev) => {
+        if (prev.scrollX === scrollX && prev.scrollY === scrollY && prev.zoom === zoomValue) {
+          return prev
+        }
+        return {
+          ...prev,
+          scrollX,
+          scrollY,
+          zoom: zoomValue,
+        }
+      })
+    })
+
+    return () => {
+      if (typeof unsubscribe === 'function') {
+        unsubscribe()
+      }
+    }
+  }, [excalidrawAPI])
+
+  useEffect(() => {
+    if (!excalidrawAPI) {
+      return undefined
+    }
+
+    const updateOffsets = () => {
+      const appState = excalidrawAPI.getAppState()
+      if (!appState) {
+        return
+      }
+
+      setViewportState((prev) => {
+        const offsetLeft = appState.offsetLeft ?? 0
+        const offsetTop = appState.offsetTop ?? 0
+        if (prev.offsetLeft === offsetLeft && prev.offsetTop === offsetTop) {
+          return prev
+        }
+        return {
+          ...prev,
+          offsetLeft,
+          offsetTop,
+        }
+      })
+    }
+
+    updateOffsets()
+    window.addEventListener('resize', updateOffsets)
+
+    return () => {
+      window.removeEventListener('resize', updateOffsets)
+    }
+  }, [excalidrawAPI])
 
   useEffect(() => {
     if (!excalidrawAPI || typeof window === 'undefined') {
@@ -236,6 +331,40 @@ function App() {
       const zoom = appState.zoom?.value ?? 1
       const sceneX = viewportX / zoom - (appState.scrollX ?? 0)
       const sceneY = viewportY / zoom - (appState.scrollY ?? 0)
+
+      setViewportState((prev) => {
+        const offsetLeftValue = appState.offsetLeft ?? 0
+        const offsetTopValue = appState.offsetTop ?? 0
+        if (prev.offsetLeft === offsetLeftValue && prev.offsetTop === offsetTopValue) {
+          return prev
+        }
+        return {
+          ...prev,
+          offsetLeft: offsetLeftValue,
+          offsetTop: offsetTopValue,
+        }
+      })
+
+      if (userIdentity && updateCursorPosition) {
+        const now = performance.now()
+        if (now - lastCursorUpdateRef.current > 50) {
+          lastCursorUpdateRef.current = now
+          const lastSent = lastSentCursorRef.current
+          if (
+            lastSent.x === null ||
+            Math.abs(sceneX - lastSent.x) > 0.5 ||
+            Math.abs(sceneY - lastSent.y) > 0.5
+          ) {
+            lastSentCursorRef.current = { x: sceneX, y: sceneY }
+            updateCursorPosition({
+              x: sceneX,
+              y: sceneY,
+              color: userIdentity.color,
+              username: userIdentity.username,
+            })
+          }
+        }
+      }
 
       const elements = excalidrawAPI.getSceneElements().filter(
         (element) => !element.isDeleted && element.type !== 'selection'
@@ -355,17 +484,72 @@ function App() {
     const handlePointerDown = () => {
       clearHoverInfo()
     }
+    const handlePointerLeave = () => {
+      clearHoverInfo()
+      if (updateCursorPosition) {
+        updateCursorPosition(null)
+      }
+      lastSentCursorRef.current = { x: null, y: null }
+    }
 
     window.addEventListener('pointermove', handlePointerMove, { passive: true })
     window.addEventListener('pointerdown', handlePointerDown, { passive: true })
-    window.addEventListener('pointerleave', clearHoverInfo, { passive: true })
+    window.addEventListener('pointerleave', handlePointerLeave, { passive: true })
 
     return () => {
+      if (updateCursorPosition) {
+        updateCursorPosition(null)
+      }
+      lastSentCursorRef.current = { x: null, y: null }
       window.removeEventListener('pointermove', handlePointerMove)
       window.removeEventListener('pointerdown', handlePointerDown)
-      window.removeEventListener('pointerleave', clearHoverInfo)
+      window.removeEventListener('pointerleave', handlePointerLeave)
     }
-  }, [excalidrawAPI, onlineUsers])
+  }, [excalidrawAPI, onlineUsers, updateCursorPosition, userIdentity])
+
+  const now = Date.now()
+
+  const remoteCursorElements = onlineUsers
+    .filter((user) => user.id !== userIdentity?.browserId)
+    .map((user) => {
+      const cursor = user.cursor
+      if (!cursor) {
+        return null
+      }
+
+      if (!Number.isFinite(cursor.x) || !Number.isFinite(cursor.y)) {
+        return null
+      }
+
+      const updatedAt = cursor.syncedAt ?? cursor.updatedAt ?? 0
+      if (now - updatedAt > 15000) {
+        return null
+      }
+
+      const screenX = (cursor.x + viewportState.scrollX) * viewportState.zoom + viewportState.offsetLeft
+      const screenY = (cursor.y + viewportState.scrollY) * viewportState.zoom + viewportState.offsetTop
+
+      if (!Number.isFinite(screenX) || !Number.isFinite(screenY)) {
+        return null
+      }
+
+      const label = cursor.username || user.username || 'Guest'
+      const color = cursor.color || user.color || '#4ECDC4'
+
+      return (
+        <div
+          key={`cursor-${user.id}`}
+          className="remote-cursor"
+          style={{ top: screenY, left: screenX }}
+        >
+          <span className="remote-cursor__icon" style={{ backgroundColor: color }} />
+          <span className="remote-cursor__label" style={{ borderColor: color }}>
+            {label}
+          </span>
+        </div>
+      )
+    })
+    .filter(Boolean)
 
   return (
     <div className={`app app-${theme}`}>
@@ -377,10 +561,15 @@ function App() {
           </span>
         </h1>
 
-        <div className="online-indicator" aria-live="polite">
+        <div
+          className="online-indicator"
+          aria-live="polite"
+          aria-label={`${onlineCount} ${onlineCount === 1 ? 'person online' : 'people online'}`}
+        >
           <span className="online-dot" />
           <span className="online-count">
-            {onlineUsers.length} {onlineUsers.length === 1 ? 'person online' : 'people online'}
+            <span className="online-count-number">{onlineCount}</span>
+            <span className="online-count-label">online</span>
           </span>
           <div className="online-avatars" role="list">
             {visibleOnlineUsers.map((user) => (
@@ -399,27 +588,59 @@ function App() {
         </div>
 
         <div className="toolbar-controls">
-          <button type="button" onClick={handleThemeToggle}>
-            Toggle {theme === 'light' ? 'Dark' : 'Light'}
-          </button>
-          <button type="button" onClick={handleGridToggle}>
-            {gridMode ? 'Hide Grid' : 'Show Grid'}
-          </button>
-          <button type="button" onClick={handleViewToggle}>
-            {viewMode ? 'Edit Mode' : 'View Mode'}
-          </button>
-          <button type="button" onClick={handleZenToggle}>
-            {zenMode ? 'Exit Zen' : 'Enter Zen'}
+          <button
+            type="button"
+            className="icon-button"
+            onClick={handleThemeToggle}
+            aria-label={`Toggle ${theme === 'light' ? 'Dark' : 'Light'} Mode`}
+            title={`Toggle ${theme === 'light' ? 'Dark' : 'Light'} Mode`}
+          >
+            {theme === 'light' ? <MoonStars size={20} weight="fill" /> : <Sun size={20} weight="fill" />}
           </button>
           <button
             type="button"
+            className="icon-button"
+            onClick={handleGridToggle}
+            aria-label={gridMode ? 'Hide Grid' : 'Show Grid'}
+            title={gridMode ? 'Hide Grid' : 'Show Grid'}
+          >
+            <GridFour size={20} weight={gridMode ? 'fill' : 'regular'} />
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            onClick={handleViewToggle}
+            aria-label={viewMode ? 'Exit View Mode' : 'Enter View Mode'}
+            title={viewMode ? 'Exit View Mode' : 'Enter View Mode'}
+          >
+            {viewMode ? <EyeSlash size={20} weight="fill" /> : <Eye size={20} weight="regular" />}
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            onClick={handleZenToggle}
+            aria-label={zenMode ? 'Exit Zen Mode' : 'Enter Zen Mode'}
+            title={zenMode ? 'Exit Zen Mode' : 'Enter Zen Mode'}
+          >
+            {zenMode ? <ArrowsOutSimple size={20} weight="fill" /> : <ArrowsInSimple size={20} weight="regular" />}
+          </button>
+          <button
+            type="button"
+            className="icon-button"
             onClick={handleResetScene}
             disabled={!userIdentity || !excalidrawAPI}
+            aria-label="Clear My Items"
+            title="Clear My Items"
           >
-            Clear My Items
+            <Broom size={20} weight="regular" />
           </button>
-          <a href="/analytics" className="analytics-link">
-            📊 Analytics
+          <a
+            href="/analytics"
+            className="analytics-link icon-link"
+            aria-label="Analytics"
+            title="Analytics"
+          >
+            <ChartLineUp size={20} weight="regular" />
           </a>
         </div>
       </header>
@@ -466,6 +687,7 @@ function App() {
           }}
         />
       </main>
+      {remoteCursorElements}
       {hoveredOwner && (
         <div
           className="element-owner-tooltip"

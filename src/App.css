@@ -39,23 +39,54 @@
   font-size: 1.1rem;
   font-weight: 600;
   margin: 0;
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  font-family: 'Bricolage Grotesque', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
 .version-info {
-  font-size: 0.7rem;
-  font-weight: 500;
-  opacity: 0.5;
-  font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
-  letter-spacing: 0.02em;
-  transition: opacity 120ms ease;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 0.18rem 0.5rem;
+  border-radius: 0.45rem;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: linear-gradient(135deg, rgba(98, 129, 250, 0.22), rgba(111, 79, 229, 0.16));
+  color: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(18px);
+  position: relative;
+  overflow: hidden;
+  transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease, color 120ms ease;
   cursor: help;
 }
 
+.version-info::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at top left, rgba(255, 255, 255, 0.35), transparent 60%);
+  opacity: 0.9;
+  mix-blend-mode: screen;
+  pointer-events: none;
+}
+
+.toolbar.theme--dark .version-info {
+  color: rgba(15, 23, 42, 0.85);
+  background: linear-gradient(135deg, rgba(226, 232, 240, 0.9), rgba(203, 213, 225, 0.75));
+  border-color: rgba(148, 163, 184, 0.35);
+}
+
+.toolbar.theme--dark .version-info::before {
+  background: radial-gradient(circle at top left, rgba(255, 255, 255, 0.45), transparent 60%);
+}
+
 .version-info:hover {
-  opacity: 0.8;
+  transform: translateY(-1px);
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.18);
+  border-color: rgba(255, 255, 255, 0.28);
+  color: rgba(255, 255, 255, 0.95);
 }
 
 .toolbar-controls {
@@ -69,10 +100,10 @@
 .online-indicator {
   display: flex;
   align-items: center;
-  gap: 0.45rem;
+  gap: 0.35rem;
   margin-left: auto;
-  font-size: 0.85rem;
-  padding: 0.35rem 0.8rem;
+  font-size: 0.8rem;
+  padding: 0.3rem 0.6rem;
   border-radius: 999px;
   border: 1px solid var(--toolbar-border);
   background: rgba(98, 129, 250, 0.08);
@@ -81,15 +112,30 @@
 }
 
 .online-dot {
-  width: 0.55rem;
-  height: 0.55rem;
+  width: 0.45rem;
+  height: 0.45rem;
   border-radius: 50%;
   background: #30c36b;
   box-shadow: 0 0 0 4px rgba(48, 195, 107, 0.12);
 }
 
 .online-count {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.2rem;
   font-weight: 600;
+}
+
+.online-count-number {
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.online-count-label {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  opacity: 0.7;
 }
 
 .online-avatars {
@@ -136,6 +182,21 @@
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
+}
+
+.toolbar .icon-button,
+.toolbar .icon-link {
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
+  justify-content: center;
+  gap: 0;
+}
+
+.toolbar .icon-button svg,
+.toolbar .icon-link svg {
+  width: 1.4rem;
+  height: 1.4rem;
 }
 
 .toolbar button:hover,
@@ -197,6 +258,10 @@
   50% {
     opacity: 1;
   }
+}
+
+.toolbar h1 {
+  font-family: 'Bricolage Grotesque', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
 .user-id-display {
@@ -291,4 +356,37 @@
   font-size: 0.9rem;
   font-weight: 600;
   word-break: break-word;
+}
+
+.remote-cursor {
+  position: fixed;
+  pointer-events: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  transform: translate(-50%, -50%);
+  z-index: 190;
+}
+
+.remote-cursor__icon {
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: 50%;
+  box-shadow: 0 0 0 4px rgba(0, 0, 0, 0.08);
+}
+
+.remote-cursor__label {
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--app-foreground);
+  border: 1px solid transparent;
+  background: rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(12px);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+.canvas-area .excalidraw .zoom-actions {
+  display: none;
 }

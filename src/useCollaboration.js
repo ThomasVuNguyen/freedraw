@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { onDisconnect, onValue, push, ref, serverTimestamp, set, update } from 'firebase/database'
 import { database } from './firebase'
 import { getOrCreateUserIdentity } from './userIdentity'
@@ -23,6 +23,7 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
   const [userIdentity, setUserIdentity] = useState(null)
   const [onlineUsers, setOnlineUsers] = useState([])
   const [isAdmin, setIsAdmin] = useState(false)
+  const presenceRefRef = useRef(null)
   const userIdRef = useRef(null)
   const isSyncingRef = useRef(false)
   const lastUpdateRef = useRef(null)
@@ -37,7 +38,21 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
     const presenceListRef = ref(database, PRESENCE_PATH)
     const unsubscribePresence = onValue(presenceListRef, (snapshot) => {
       const presenceData = snapshot.val() || {}
-      const users = Object.values(presenceData).filter(Boolean)
+      const now = Date.now()
+      const users = Object.values(presenceData)
+        .filter(Boolean)
+        .map((user) => {
+          if (user.cursor) {
+            return {
+              ...user,
+              cursor: {
+                ...user.cursor,
+                syncedAt: now,
+              },
+            }
+          }
+          return user
+        })
       users.sort((a, b) => {
         const aJoined = a.joinedAt || 0
         const bJoined = b.joinedAt || 0
@@ -132,10 +147,12 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
           color: identity.color,
           joinedAt: Date.now(),
           lastActiveAt: serverTimestamp(),
+          cursor: null,
         }
 
         set(presenceRef, userPresence)
         onDisconnect(presenceRef).remove()
+        presenceRefRef.current = presenceRef
       }
 
       const startSession = async () => {
@@ -420,6 +437,7 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
           clearTimeout(lastUpdateRef.current)
         }
 
+        presenceRefRef.current = null
         unsubscribeCanvas()
         if (unsubscribeChange) {
           unsubscribeChange()
@@ -440,5 +458,27 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
     }
   }, [excalidrawAPI, isLoaded])
 
-  return { isLoaded, userIdentity, onlineUsers, isAdmin }
+  const updateCursorPosition = useCallback((cursor) => {
+    const presenceRef = presenceRefRef.current
+    if (!presenceRef) {
+      return
+    }
+
+    const payload = cursor
+      ? {
+          cursor: {
+            ...cursor,
+            updatedAt: Date.now(),
+          },
+        }
+      : {
+          cursor: null,
+        }
+
+    update(presenceRef, payload).catch((error) => {
+      console.error('Error updating cursor position:', error)
+    })
+  }, [])
+
+  return { isLoaded, userIdentity, onlineUsers, isAdmin, updateCursorPosition }
 }
