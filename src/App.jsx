@@ -51,7 +51,9 @@ function App() {
   const [isManualAvatarEdit, setIsManualAvatarEdit] = useState(false)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [selectedColor, setSelectedColor] = useState('#212121')
+  const [selectedBackgroundColor, setSelectedBackgroundColor] = useState('transparent')
   const [hasSelectedElements, setHasSelectedElements] = useState(false)
+  const [colorMode, setColorMode] = useState('stroke') // 'stroke' or 'background'
   const menuRef = useRef(null)
 
   // Enable real-time collaboration
@@ -113,12 +115,21 @@ function App() {
     [excalidrawAPI]
   )
 
+  const handleColorModeToggle = useCallback(() => {
+    setColorMode((prev) => (prev === 'stroke' ? 'background' : 'stroke'))
+  }, [])
+
   const handleColorSelect = useCallback(
     (color) => {
       if (!excalidrawAPI) {
         return
       }
-      setSelectedColor(color)
+
+      if (colorMode === 'stroke') {
+        setSelectedColor(color)
+      } else {
+        setSelectedBackgroundColor(color)
+      }
 
       // Get currently selected elements
       const appState = excalidrawAPI.getAppState()
@@ -130,11 +141,21 @@ function App() {
         const elements = excalidrawAPI.getSceneElements()
         const updatedElements = elements.map(element => {
           if (selectedIds.includes(element.id)) {
-            // For most elements, update stroke color
-            // For frames, stroke color is the border color
-            return {
-              ...element,
-              strokeColor: color,
+            if (colorMode === 'stroke') {
+              return {
+                ...element,
+                strokeColor: color,
+                version: element.version + 1,
+                versionNonce: Math.floor(Math.random() * 2 ** 31),
+              }
+            } else {
+              // Background mode
+              return {
+                ...element,
+                backgroundColor: color,
+                version: element.version + 1,
+                versionNonce: Math.floor(Math.random() * 2 ** 31),
+              }
             }
           }
           return element
@@ -143,19 +164,21 @@ function App() {
         excalidrawAPI.updateScene({
           elements: updatedElements,
           appState: {
-            currentItemStrokeColor: color,
+            currentItemStrokeColor: colorMode === 'stroke' ? color : appState.currentItemStrokeColor,
+            currentItemBackgroundColor: colorMode === 'background' ? color : appState.currentItemBackgroundColor,
           },
         })
       } else {
         // No selection, just update the current color for new elements
         excalidrawAPI.updateScene({
           appState: {
-            currentItemStrokeColor: color,
+            currentItemStrokeColor: colorMode === 'stroke' ? color : appState.currentItemStrokeColor,
+            currentItemBackgroundColor: colorMode === 'background' ? color : appState.currentItemBackgroundColor,
           },
         })
       }
     },
-    [excalidrawAPI]
+    [excalidrawAPI, colorMode]
   )
 
   useEffect(() => {
@@ -832,8 +855,10 @@ function App() {
 
       {(hasSelectedElements || activeTool !== 'selection') && (
         <ColorPalette
-          selectedColor={selectedColor}
+          selectedColor={colorMode === 'stroke' ? selectedColor : selectedBackgroundColor}
           onColorSelect={handleColorSelect}
+          colorMode={colorMode}
+          onModeToggle={handleColorModeToggle}
           isDarkTheme={theme === 'dark'}
         />
       )}
