@@ -33,6 +33,12 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
   const heartbeatRef = useRef(null)
   const isAdminRef = useRef(false)
   const adminMapRef = useRef({})
+  const hasPendingSaveRef = useRef(false)
+  const lastAppStateRef = useRef(null)
+  const isApplyingSceneUpdateRef = useRef(false)
+  const isSavingRef = useRef(false)
+  const lastSaveStartedAtRef = useRef(0)
+  const needsResaveRef = useRef(false)
 
   useEffect(() => {
     const presenceListRef = ref(database, PRESENCE_PATH)
@@ -212,6 +218,7 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
             })
 
             isSyncingRef.current = true
+            isApplyingSceneUpdateRef.current = true
 
             let filesToLoad = null
             if (data.files) {
@@ -261,6 +268,7 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
 
             setTimeout(() => {
               isSyncingRef.current = false
+              isApplyingSceneUpdateRef.current = false
             }, 500)
 
             if (!isLoaded) {
@@ -272,6 +280,7 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
             console.error('Error loading canvas from Firebase:', error)
             hasLoadedInitialDataRef.current = true
             isSyncingRef.current = false
+            isApplyingSceneUpdateRef.current = false
           }
         } else if (!data) {
           console.log('No data in Firebase, starting fresh')
@@ -282,12 +291,153 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
         }
       })
 
-      const handleChange = (elements, appState) => {
-        if (!hasLoadedInitialDataRef.current) {
+      const flushPendingSave = (options = {}) => {
+        const { reason = 'debounce', allowRetry = true } = options
+
+        if (import.meta.env?.DEV) {
+          console.log('flushPendingSave invoked', { reason, allowRetry })
+        }
+
+        if (!excalidrawAPI) {
+          console.warn('flushPendingSave aborted: excalidrawAPI not ready')
+          hasPendingSaveRef.current = false
+          lastUpdateRef.current = null
           return
         }
 
-        if (isSyncingRef.current) {
+        if (isSavingRef.current || isApplyingSceneUpdateRef.current) {
+          if (isSavingRef.current) {
+            const now = Date.now()
+            const lastStarted = lastSaveStartedAtRef.current || 0
+            const elapsed = now - lastStarted
+            const isStuck = elapsed > 5000
+
+            if (isStuck) {
+              console.warn('Previous Firebase save appears stuck; releasing lock')
+              isSavingRef.current = false
+            } else {
+              needsResaveRef.current = true
+              return
+            }
+          } else {
+            needsResaveRef.current = true
+            return
+          }
+        }
+
+        isSavingRef.current = true
+        lastSaveStartedAtRef.current = Date.now()
+        hasPendingSaveRef.current = false
+        lastUpdateRef.current = null
+        needsResaveRef.current = false
+
+        const sceneElements =
+          (previousSceneRef.current && cloneElements(previousSceneRef.current)) ||
+          cloneElements(excalidrawAPI.getSceneElements())
+
+        const latestAppState =
+          lastAppStateRef.current ||
+          excalidrawAPI.getAppState() ||
+          {}
+
+        const sceneData = {
+          elements: sceneElements,
+          appState: {
+            viewBackgroundColor: latestAppState.viewBackgroundColor,
+            gridSize: latestAppState.gridSize,
+          },
+        }
+
+        const files = excalidrawAPI.getFiles()
+        const allFiles = {
+          ...files,
+          ...(pendingFilesRef?.current || {}),
+        }
+
+        const sceneJSON = JSON.stringify(sceneData)
+        const filesJSON = JSON.stringify(allFiles)
+
+        const canvasData = {
+          sceneJSON,
+          files: filesJSON,
+          updatedBy: userId,
+          updatedAt: Date.now(),
+        }
+
+        console.log('Saving to Firebase:', {
+          elementCount: sceneData.elements.length,
+          fileCount: Object.keys(allFiles).length,
+          sizeKB: (sceneJSON.length / 1024).toFixed(2),
+          reason,
+        })
+
+        const savePromise = set(canvasRef, canvasData)
+          .then(() => {
+            console.log('Firebase save succeeded', { reason })
+          })
+          .catch((error) => {
+            console.error('Error syncing to Firebase:', error)
+            throw error
+          })
+          .finally(() => {
+            isSavingRef.current = false
+            const shouldResave = needsResaveRef.current
+            needsResaveRef.current = false
+            if (shouldResave) {
+              flushPendingSave({ reason: 'post-save', allowRetry: false })
+            }
+          })
+
+        // Add a watchdog in case the promise gets hung (rare browser networking issues)
+        setTimeout(() => {
+          if (isSavingRef.current && Date.now() - lastSaveStartedAtRef.current > 8000) {
+            console.warn('Firebase save watchdog releasing lock after timeout')
+            isSavingRef.current = false
+            const shouldResave = needsResaveRef.current
+            needsResaveRef.current = false
+            if (shouldResave) {
+              flushPendingSave({ reason: 'watchdog', allowRetry: false })
+            }
+          }
+        }, 8000)
+
+        return savePromise
+      }
+
+      const queueSave = (triggerReason) => {
+        if (lastUpdateRef.current) {
+          clearTimeout(lastUpdateRef.current)
+        }
+
+        lastUpdateRef.current = setTimeout(() => flushPendingSave({ reason: triggerReason }), 300)
+        hasPendingSaveRef.current = true
+        console.log('Queued canvas save to Firebase', { reason: triggerReason })
+      }
+
+      const handleVisibilityChange = () => {
+        if (document.visibilityState === 'hidden' && hasPendingSaveRef.current) {
+          flushPendingSave({ reason: 'visibilitychange', allowRetry: false })
+        }
+      }
+
+      const handlePageHide = () => {
+        if (hasPendingSaveRef.current) {
+          flushPendingSave({ reason: 'pagehide', allowRetry: false })
+        }
+      }
+
+      window.addEventListener('visibilitychange', handleVisibilityChange)
+      window.addEventListener('pagehide', handlePageHide)
+      window.addEventListener('beforeunload', handlePageHide)
+
+      const handleChange = (elements, appState) => {
+        if (!hasLoadedInitialDataRef.current) {
+          console.log('handleChange ignored: initial data not loaded')
+          return
+        }
+
+        if (isApplyingSceneUpdateRef.current) {
+          console.log('handleChange ignored: applying remote scene')
           return
         }
 
@@ -353,9 +503,11 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
 
         if (hasUnauthorizedChange) {
           isSyncingRef.current = true
+          isApplyingSceneUpdateRef.current = true
           excalidrawAPI.updateScene({ elements: authorizedElements })
           const releaseSyncFlag = () => {
             isSyncingRef.current = false
+            isApplyingSceneUpdateRef.current = false
           }
           if (typeof requestAnimationFrame === 'function') {
             requestAnimationFrame(releaseSyncFlag)
@@ -364,57 +516,12 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
           }
         }
 
-        if (lastUpdateRef.current) {
-          clearTimeout(lastUpdateRef.current)
+        lastAppStateRef.current = {
+          viewBackgroundColor: appState.viewBackgroundColor,
+          gridSize: appState.gridSize,
         }
 
-        lastUpdateRef.current = setTimeout(() => {
-          isSyncingRef.current = true
-
-          const sceneElements =
-            (previousSceneRef.current && cloneElements(previousSceneRef.current)) ||
-            cloneElements(excalidrawAPI.getSceneElements())
-          const sceneData = {
-            elements: sceneElements,
-            appState: {
-              viewBackgroundColor: appState.viewBackgroundColor,
-              gridSize: appState.gridSize,
-            },
-          }
-
-          const files = excalidrawAPI.getFiles()
-          const allFiles = {
-            ...files,
-            ...(pendingFilesRef?.current || {}),
-          }
-
-          const sceneJSON = JSON.stringify(sceneData)
-          const filesJSON = JSON.stringify(allFiles)
-
-          const canvasData = {
-            sceneJSON,
-            files: filesJSON,
-            updatedBy: userId,
-            updatedAt: Date.now(),
-          }
-
-          console.log('Saving to Firebase:', {
-            elementCount: sceneData.elements.length,
-            fileCount: Object.keys(allFiles).length,
-            sizeKB: (sceneJSON.length / 1024).toFixed(2),
-          })
-
-          set(canvasRef, canvasData)
-            .then(() => {
-              setTimeout(() => {
-                isSyncingRef.current = false
-              }, 100)
-            })
-            .catch((error) => {
-              console.error('Error syncing to Firebase:', error)
-              isSyncingRef.current = false
-            })
-        }, 300)
+        queueSave('debounce')
       }
 
       const unsubscribeChange = excalidrawAPI.onChange(handleChange)
@@ -437,7 +544,16 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
 
         if (lastUpdateRef.current) {
           clearTimeout(lastUpdateRef.current)
+          lastUpdateRef.current = null
         }
+
+        if (hasPendingSaveRef.current) {
+          flushPendingSave({ reason: 'cleanup' })
+        }
+
+        window.removeEventListener('visibilitychange', handleVisibilityChange)
+        window.removeEventListener('pagehide', handlePageHide)
+        window.removeEventListener('beforeunload', handlePageHide)
 
         presenceRefRef.current = null
         unsubscribeCanvas()

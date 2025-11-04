@@ -276,8 +276,7 @@
   height: 100%;
 }
 
-/* Default Excalidraw toolbar hidden via CSS so our custom toolbar is the only control surface.
-   Remove this block (or the display overrides) to bring the stock toolbar back. */
+/* Hide default Excalidraw toolbar so our custom toolbar is the only visible control surface */
 .canvas-area .excalidraw .App-toolbar,
 .canvas-area .excalidraw .App-toolbar-container,
 .canvas-area .excalidraw .App-toolbar-content,

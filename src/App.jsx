@@ -857,6 +857,7 @@ function App() {
           ref={excalidrawRef}
           excalidrawAPI={setExcalidrawAPI}
           theme={theme}
+          localStorageKey={null}
           viewModeEnabled={viewMode}
           zenModeEnabled={zenMode}
           gridModeEnabled={gridMode}
