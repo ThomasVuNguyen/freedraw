@@ -458,7 +458,7 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
     return () => {
       if (cleanup) cleanup()
     }
-  }, [excalidrawAPI, isLoaded])
+  }, [excalidrawAPI, isLoaded, pendingFilesRef])
 
   const updateCursorPosition = useCallback((cursor) => {
     const presenceRef = presenceRefRef.current

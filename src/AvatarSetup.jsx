@@ -164,7 +164,7 @@ function AvatarSetup({ isOpen, onSave, onSkip, accentColor, initialAvatarUrl }) 
     } finally {
       setIsSaving(false)
     }
-  }, [isSaving, onSave])
+  }, [centerElements, isSaving, onSave])
 
   const handleAPIChange = useCallback(
     (api) => {

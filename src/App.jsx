@@ -17,6 +17,7 @@ import './App.css'
 import { useCollaboration } from './useCollaboration'
 import { handleImageUpload, uploadAvatarToStorage } from './imageHandler'
 import AvatarSetup from './AvatarSetup'
+import CustomToolbar from './CustomToolbar'
 
 const APP_NAME = 'arcadia'
 
@@ -30,6 +31,7 @@ function App() {
   const [gridMode, setGridMode] = useState(false)
   const [viewMode, setViewMode] = useState(false)
   const [zenMode] = useState(true)
+  const [activeTool, setActiveTool] = useState('selection')
   const pendingFilesRef = useRef({})
   const hoverInfoRef = useRef(null)
   const lastCursorUpdateRef = useRef(0)
@@ -61,31 +63,6 @@ function App() {
     excalidrawAPI,
     pendingFilesRef
   )
-
-  const handleResetScene = useCallback(() => {
-    if (!excalidrawAPI || !userIdentity) {
-      return
-    }
-
-    const currentElements = excalidrawAPI.getSceneElements()
-    if (!currentElements.length) {
-      return
-    }
-
-    const retainedElements = currentElements.filter((element) => {
-      const owner = element.customData?.createdBy
-      if (!owner) {
-        return true
-      }
-      return owner !== userIdentity.browserId
-    })
-
-    if (retainedElements.length === currentElements.length) {
-      return
-    }
-
-    excalidrawAPI.updateScene({ elements: retainedElements })
-  }, [excalidrawAPI, userIdentity])
 
   const handleThemeToggle = useCallback(() => {
     setTheme((current) => (current === 'light' ? 'dark' : 'light'))
@@ -121,6 +98,17 @@ function App() {
     handleViewToggle()
     closeMenu()
   }, [handleViewToggle, closeMenu])
+
+  const handleToolSelect = useCallback(
+    (toolType) => {
+      if (!excalidrawAPI) {
+        return
+      }
+      excalidrawAPI.setActiveTool({ type: toolType })
+      setActiveTool(toolType)
+    },
+    [excalidrawAPI]
+  )
 
   useEffect(() => {
     if (!isMenuOpen) {
@@ -389,12 +377,26 @@ function App() {
 
   useEffect(() => {
     if (!excalidrawAPI) {
+      return
+    }
+
+    const currentTool = excalidrawAPI.getAppState()?.activeTool?.type
+    if (currentTool) {
+      setActiveTool(currentTool)
+    }
+  }, [excalidrawAPI])
+
+  useEffect(() => {
+    if (!excalidrawAPI) {
       return undefined
     }
 
     const unsubscribe = excalidrawAPI.onChange((_, appState) => {
       const open = appState.openSidebar?.tab === 'search'
       setIsSearchOpen((prev) => (prev === open ? prev : open))
+
+      const nextTool = appState.activeTool?.type || 'selection'
+      setActiveTool((prev) => (prev === nextTool ? prev : nextTool))
     })
 
     return () => {
@@ -762,6 +764,12 @@ function App() {
           </div>
         </div>
       </div>
+
+      <CustomToolbar
+        activeTool={activeTool}
+        onSelect={handleToolSelect}
+        isDarkTheme={theme === 'dark'}
+      />
 
       <main className="canvas-area">
         {!isLoaded && (
