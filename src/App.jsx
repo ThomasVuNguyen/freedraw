@@ -771,65 +771,77 @@ function App() {
         )}
         {userIdentity && (
           <div className="user-hud">
-            <div className="user-card">
+            <div className="user-tray">
               <button
                 type="button"
-                className={`user-card__portrait${userIdentity.avatarUrl ? ' user-card__portrait--image' : ''}`}
-                onClick={handleAvatarEdit}
-                aria-label={userIdentity.avatarUrl ? 'Edit avatar' : 'Add avatar'}
+                className="presence-toggle"
+                onClick={() => setIsMenuOpen(false)}
+                aria-label={`${onlineCount} ${onlineCount === 1 ? 'person' : 'people'} online`}
               >
-                {userIdentity.avatarUrl ? (
-                  <img src={userIdentity.avatarUrl} alt={`${userIdentity.username} avatar`} />
-                ) : (
-                  <span className="user-card__initial">
-                    {userIdentity.username?.charAt(0)?.toUpperCase() ?? '?'}
-                  </span>
-                )}
+                {onlineCount}
               </button>
-              <div className="user-card__footer">
-                <span className="user-card__label">You are</span>
-                <span
-                  className="user-card__name"
-                  style={{ color: userIdentity.color }}
-                >
-                  {userIdentity.username}
-                </span>
-                <div className="user-card__meta">
-                  {isAdmin && <span className="user-role-badge">Admin</span>}
-                  <button type="button" className="user-card__edit" onClick={handleAvatarEdit}>
-                    {userIdentity.avatarUrl ? 'Edit avatar' : 'Add avatar'}
-                  </button>
-                </div>
-              </div>
-            </div>
-            <div className="presence-pill" aria-live="polite">
-              <span className="presence-pill__dot" />
-              <div className="presence-pill__counts">
-                <span className="presence-pill__number">{onlineCount}</span>
-                <span className="presence-pill__label">
-                  {onlineCount === 1 ? 'online' : 'online'}
-                </span>
-              </div>
-              {visibleOnlineUsers.length > 0 && (
-                <div className="presence-pill__avatars" role="list">
-                  {visibleOnlineUsers.map((user) => (
-                    <span
-                      role="listitem"
-                      key={user.id}
-                      className={`presence-pill__avatar${user.avatarUrl ? ' presence-pill__avatar--image' : ''}`}
-                      style={{ backgroundColor: user.color }}
-                      title={user.username}
-                    >
-                      {user.avatarUrl ? (
-                        <img src={user.avatarUrl} alt={`${user.username ?? 'Guest'} avatar`} />
-                      ) : (
-                        user.username?.charAt(0)?.toUpperCase() ?? '?'
-                      )}
+              <div className="user-tray__panel">
+                <div className="presence-summary" aria-live="polite">
+                  <span className="presence-summary__dot" />
+                  <div className="presence-summary__text">
+                    <span className="presence-summary__count">{onlineCount}</span>
+                    <span className="presence-summary__label">
+                      {onlineCount === 1 ? 'person online' : 'people online'}
                     </span>
-                  ))}
-                  {overflowCount > 0 && <span className="presence-pill__more">+{overflowCount}</span>}
+                  </div>
+                  {visibleOnlineUsers.length > 0 && (
+                    <div className="presence-summary__avatars" role="list">
+                      {visibleOnlineUsers.map((user) => (
+                        <span
+                          role="listitem"
+                          key={user.id}
+                          className={`presence-summary__avatar${user.avatarUrl ? ' presence-summary__avatar--image' : ''}`}
+                          style={{ backgroundColor: user.color }}
+                          title={user.username}
+                        >
+                          {user.avatarUrl ? (
+                            <img src={user.avatarUrl} alt={`${user.username ?? 'Guest'} avatar`} />
+                          ) : (
+                            user.username?.charAt(0)?.toUpperCase() ?? '?'
+                          )}
+                        </span>
+                      ))}
+                      {overflowCount > 0 && <span className="presence-summary__more">+{overflowCount}</span>}
+                    </div>
+                  )}
                 </div>
-              )}
+                <div className="user-card">
+                  <button
+                    type="button"
+                    className={`user-card__portrait${userIdentity.avatarUrl ? ' user-card__portrait--image' : ''}`}
+                    onClick={handleAvatarEdit}
+                    aria-label={userIdentity.avatarUrl ? 'Edit avatar' : 'Add avatar'}
+                  >
+                    {userIdentity.avatarUrl ? (
+                      <img src={userIdentity.avatarUrl} alt={`${userIdentity.username} avatar`} />
+                    ) : (
+                      <span className="user-card__initial">
+                        {userIdentity.username?.charAt(0)?.toUpperCase() ?? '?'}
+                      </span>
+                    )}
+                  </button>
+                  <div className="user-card__footer">
+                    <span className="user-card__label">You are</span>
+                    <span
+                      className="user-card__name"
+                      style={{ color: userIdentity.color }}
+                    >
+                      {userIdentity.username}
+                    </span>
+                    <div className="user-card__meta">
+                      {isAdmin && <span className="user-role-badge">Admin</span>}
+                      <button type="button" className="user-card__edit" onClick={handleAvatarEdit}>
+                        {userIdentity.avatarUrl ? 'Edit avatar' : 'Add avatar'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         )}
