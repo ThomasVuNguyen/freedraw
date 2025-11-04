@@ -18,6 +18,7 @@ import { useCollaboration } from './useCollaboration'
 import { handleImageUpload, uploadAvatarToStorage } from './imageHandler'
 import AvatarSetup from './AvatarSetup'
 import CustomToolbar from './CustomToolbar'
+import ColorPalette from './ColorPalette'
 
 const APP_NAME = 'arcadia'
 
@@ -49,6 +50,8 @@ function App() {
   const [hasDismissedAvatarPrompt, setHasDismissedAvatarPrompt] = useState(true)
   const [isManualAvatarEdit, setIsManualAvatarEdit] = useState(false)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const [selectedColor, setSelectedColor] = useState('#212121')
+  const [hasSelectedElements, setHasSelectedElements] = useState(false)
   const menuRef = useRef(null)
 
   // Enable real-time collaboration
@@ -110,6 +113,51 @@ function App() {
     [excalidrawAPI]
   )
 
+  const handleColorSelect = useCallback(
+    (color) => {
+      if (!excalidrawAPI) {
+        return
+      }
+      setSelectedColor(color)
+
+      // Get currently selected elements
+      const appState = excalidrawAPI.getAppState()
+      const selectedElementIds = appState.selectedElementIds || {}
+      const selectedIds = Object.keys(selectedElementIds).filter(id => selectedElementIds[id])
+
+      if (selectedIds.length > 0) {
+        // Update colors of selected elements
+        const elements = excalidrawAPI.getSceneElements()
+        const updatedElements = elements.map(element => {
+          if (selectedIds.includes(element.id)) {
+            // For most elements, update stroke color
+            // For frames, stroke color is the border color
+            return {
+              ...element,
+              strokeColor: color,
+            }
+          }
+          return element
+        })
+
+        excalidrawAPI.updateScene({
+          elements: updatedElements,
+          appState: {
+            currentItemStrokeColor: color,
+          },
+        })
+      } else {
+        // No selection, just update the current color for new elements
+        excalidrawAPI.updateScene({
+          appState: {
+            currentItemStrokeColor: color,
+          },
+        })
+      }
+    },
+    [excalidrawAPI]
+  )
+
   useEffect(() => {
     if (!isMenuOpen) {
       return undefined
@@ -142,23 +190,29 @@ function App() {
   }, [isMenuOpen, closeMenu])
 
   useEffect(() => {
-    if (!excalidrawAPI || !userIdentity?.color) {
+    if (userIdentity?.color && selectedColor === '#212121') {
+      setSelectedColor(userIdentity.color)
+    }
+  }, [userIdentity, selectedColor])
+
+  useEffect(() => {
+    if (!excalidrawAPI || !selectedColor) {
       return
     }
 
     const currentAppState = excalidrawAPI.getAppState()
 
-    if (currentAppState?.currentItemStrokeColor === userIdentity.color) {
+    if (currentAppState?.currentItemStrokeColor === selectedColor) {
       return
     }
 
     const nextAppState = {
       ...currentAppState,
-      currentItemStrokeColor: userIdentity.color,
+      currentItemStrokeColor: selectedColor,
     }
 
     excalidrawAPI.updateScene({ appState: nextAppState })
-  }, [excalidrawAPI, userIdentity])
+  }, [excalidrawAPI, selectedColor])
 
   useEffect(() => {
     if (!userIdentity) {
@@ -397,6 +451,11 @@ function App() {
 
       const nextTool = appState.activeTool?.type || 'selection'
       setActiveTool((prev) => (prev === nextTool ? prev : nextTool))
+
+      // Track if any elements are selected
+      const selectedElementIds = appState.selectedElementIds || {}
+      const hasSelection = Object.keys(selectedElementIds).some(id => selectedElementIds[id])
+      setHasSelectedElements((prev) => (prev === hasSelection ? prev : hasSelection))
     })
 
     return () => {
@@ -771,6 +830,14 @@ function App() {
         isDarkTheme={theme === 'dark'}
       />
 
+      {(hasSelectedElements || activeTool !== 'selection') && (
+        <ColorPalette
+          selectedColor={selectedColor}
+          onColorSelect={handleColorSelect}
+          isDarkTheme={theme === 'dark'}
+        />
+      )}
+
       <main className="canvas-area">
         {!isLoaded && (
           <div className="loading-overlay">
@@ -872,7 +939,7 @@ function App() {
           initialData={{
             appState: {
               name: APP_NAME,
-              currentItemStrokeColor: userIdentity?.color || '#4ECDC4',
+              currentItemStrokeColor: selectedColor,
               currentItemBackgroundColor: 'transparent',
             },
           }}
