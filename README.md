@@ -24,4 +24,5 @@ If you are developing a production application, we recommend using TypeScript wi
 Avatar creation & edit
 codex resume 019a4b89-12b3-7e43-b9eb-cc0ad9334c34 --yolo
 
-Branding & design
+Branding & design (logo, UI what to put where etc)
+codex resume 019a4d37-d80a-7290-8b87-8cd2eec6c613 --yolo

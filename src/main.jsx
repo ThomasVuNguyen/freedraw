@@ -15,3 +15,5 @@ createRoot(document.getElementById('root')).render(
     </BrowserRouter>
   </StrictMode>,
 )
+
+document.body.classList.add('app-mounted')
