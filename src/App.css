@@ -156,6 +156,19 @@
   color: #fff;
   filter: saturate(1.15);
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.18);
+  overflow: hidden;
+  position: relative;
+}
+
+.online-avatar--image {
+  padding: 0;
+}
+
+.online-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .online-more {
@@ -270,52 +283,137 @@
   font-family: 'Bricolage Grotesque', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
-.user-id-display {
+.user-card {
   position: absolute;
-  bottom: 1rem;
-  right: 1rem;
+  bottom: 1.25rem;
+  right: 1.25rem;
+  width: 220px;
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  padding: 0.75rem 1rem;
-  background: var(--toolbar-background);
-  border: 1px solid var(--toolbar-border);
-  border-radius: 8px;
+  background: linear-gradient(160deg, rgba(15, 23, 42, 0.92), rgba(30, 64, 175, 0.88));
+  border-radius: 18px;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  box-shadow: 0 24px 40px rgba(15, 23, 42, 0.35);
   backdrop-filter: blur(18px);
-  z-index: 50;
-  font-size: 0.85rem;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  z-index: 60;
+}
+
+.user-card__portrait {
+  all: unset;
+  display: block;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  position: relative;
+  cursor: pointer;
+  background: radial-gradient(circle at 20% 20%, rgba(96, 165, 250, 0.4), transparent 55%),
+    radial-gradient(circle at 80% 80%, rgba(147, 197, 253, 0.35), transparent 55%),
+    rgba(15, 23, 42, 0.85);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+  overflow: hidden;
+}
+
+.user-card__portrait::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border: 2px solid rgba(255, 255, 255, 0.08);
+  mix-blend-mode: screen;
+}
+
+.user-card__portrait:hover,
+.user-card__portrait:focus-visible {
+  transform: translateY(-1px);
+  box-shadow: inset 0 0 0 2px rgba(96, 165, 250, 0.35);
+}
+
+.user-card__portrait:focus-visible {
+  outline: 2px solid rgba(96, 165, 250, 0.5);
+  outline-offset: -2px;
+}
+
+.user-card__portrait img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.user-card__initial {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 3rem;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.85);
+  letter-spacing: 0.1em;
+}
+
+.user-card__footer {
+  padding: 1.1rem 1.2rem 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.user-card__label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.3em;
+  color: rgba(226, 232, 240, 0.55);
+}
+
+.user-card__name {
+  font-size: 1.3rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: #fde68a;
+  text-shadow: 0 8px 28px rgba(37, 99, 235, 0.45);
+}
+
+.user-card__meta {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.user-card__edit {
+  border: none;
+  background: rgba(96, 165, 250, 0.2);
+  color: #e0f2fe;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.35rem 0.9rem;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.user-card__edit:hover,
+.user-card__edit:focus-visible {
+  background: rgba(96, 165, 250, 0.32);
+  transform: translateY(-1px);
+  outline: none;
 }
 
 .user-role-badge {
-  align-self: flex-start;
   padding: 0.2rem 0.6rem;
   border-radius: 999px;
-  background: rgba(98, 129, 250, 0.2);
-  border: 1px solid rgba(98, 129, 250, 0.4);
-  font-size: 0.75rem;
+  background: rgba(252, 211, 77, 0.2);
+  border: 1px solid rgba(252, 211, 77, 0.4);
+  font-size: 0.7rem;
   font-weight: 600;
-  color: var(--app-foreground);
+  color: #fde68a;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
 }
 
-.user-id-label {
-  font-weight: 600;
-  color: var(--app-foreground);
-  opacity: 0.6;
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.user-id-value {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
-  font-size: 1rem;
-  font-weight: 700;
-  letter-spacing: 0.3px;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
-  word-break: break-word;
+.user-card__portrait--image {
+  background: #0f172a;
 }
 
 .element-owner-tooltip {

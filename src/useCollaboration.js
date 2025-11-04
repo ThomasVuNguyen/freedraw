@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { onDisconnect, onValue, push, ref, serverTimestamp, set, update } from 'firebase/database'
 import { database } from './firebase'
-import { getOrCreateUserIdentity } from './userIdentity'
+import { getOrCreateUserIdentity, updateStoredUserIdentity } from './userIdentity'
 
 const CANVAS_PATH = 'canvas/scene'
 const PRESENCE_PATH = 'presence/users'
@@ -145,6 +145,7 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
           id: userId,
           username: identity.username,
           color: identity.color,
+          avatarUrl: identity.avatarUrl || null,
           joinedAt: Date.now(),
           lastActiveAt: serverTimestamp(),
           cursor: null,
@@ -164,6 +165,7 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
           userId,
           username: identity.username,
           color: identity.color,
+          avatarUrl: identity.avatarUrl || null,
           startedAt: serverTimestamp(),
           lastActiveAt: serverTimestamp(),
           endedAt: null,
@@ -480,5 +482,70 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
     })
   }, [])
 
-  return { isLoaded, userIdentity, onlineUsers, isAdmin, updateCursorPosition }
+  const updateUserProfile = useCallback(async (updates) => {
+    if (!updates || typeof updates !== 'object') {
+      return null
+    }
+
+    let nextIdentity = null
+
+    setUserIdentity((previous) => {
+      if (!previous) {
+        const stored = updateStoredUserIdentity(updates)
+        nextIdentity = stored
+        return stored
+      }
+
+      const merged = {
+        ...previous,
+        ...updates,
+        avatarUrl:
+          updates.avatarUrl !== undefined
+            ? updates.avatarUrl
+            : previous.avatarUrl ?? null,
+      }
+
+      updateStoredUserIdentity(merged)
+      nextIdentity = merged
+      return merged
+    })
+
+    const presenceRef = presenceRefRef.current
+    const presenceUpdates = {}
+    if (updates.username !== undefined) {
+      presenceUpdates.username = updates.username
+    }
+    if (updates.color !== undefined) {
+      presenceUpdates.color = updates.color
+    }
+    if (updates.avatarUrl !== undefined) {
+      presenceUpdates.avatarUrl = updates.avatarUrl
+    }
+
+    if (presenceRef && Object.keys(presenceUpdates).length > 0) {
+      try {
+        await update(presenceRef, {
+          ...presenceUpdates,
+          lastActiveAt: serverTimestamp(),
+        })
+      } catch (error) {
+        console.error('Error updating presence profile:', error)
+      }
+    }
+
+    if (sessionRefRef.current && Object.keys(presenceUpdates).length > 0) {
+      try {
+        await update(sessionRefRef.current, {
+          ...presenceUpdates,
+          lastActiveAt: serverTimestamp(),
+        })
+      } catch (error) {
+        console.error('Error updating session profile:', error)
+      }
+    }
+
+    return nextIdentity
+  }, [])
+
+  return { isLoaded, userIdentity, onlineUsers, isAdmin, updateCursorPosition, updateUserProfile }
 }

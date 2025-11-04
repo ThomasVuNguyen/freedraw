@@ -15,7 +15,8 @@ import '@excalidraw/excalidraw/index.css'
 
 import './App.css'
 import { useCollaboration } from './useCollaboration'
-import { handleImageUpload } from './imageHandler'
+import { handleImageUpload, uploadAvatarToStorage } from './imageHandler'
+import AvatarSetup from './AvatarSetup'
 
 const APP_NAME = 'Arcadia'
 
@@ -42,9 +43,19 @@ function App() {
     offsetTop: 0,
   })
   const [isSearchOpen, setIsSearchOpen] = useState(false)
+  const [isAvatarSetupOpen, setIsAvatarSetupOpen] = useState(false)
+  const [hasDismissedAvatarPrompt, setHasDismissedAvatarPrompt] = useState(false)
+  const [isManualAvatarEdit, setIsManualAvatarEdit] = useState(false)
 
   // Enable real-time collaboration
-  const { isLoaded, userIdentity, onlineUsers, isAdmin, updateCursorPosition } = useCollaboration(
+  const {
+    isLoaded,
+    userIdentity,
+    onlineUsers,
+    isAdmin,
+    updateCursorPosition,
+    updateUserProfile,
+  } = useCollaboration(
     excalidrawAPI,
     pendingFilesRef
   )
@@ -104,6 +115,18 @@ function App() {
 
     excalidrawAPI.updateScene({ appState: nextAppState })
   }, [excalidrawAPI, userIdentity])
+
+  useEffect(() => {
+    if (!userIdentity) {
+      return
+    }
+
+    if (!userIdentity.avatarUrl && !hasDismissedAvatarPrompt) {
+      setIsAvatarSetupOpen(true)
+    } else if (!isManualAvatarEdit) {
+      setIsAvatarSetupOpen(false)
+    }
+  }, [userIdentity, hasDismissedAvatarPrompt, isManualAvatarEdit])
 
   // Handle image paste/upload - upload to Firebase Storage
   const handlePaste = useCallback(
@@ -229,6 +252,38 @@ function App() {
       },
     })
   }, [excalidrawAPI])
+
+  const handleAvatarSave = useCallback(
+    async (blob) => {
+      if (!userIdentity?.browserId) {
+        throw new Error('User identity not ready')
+      }
+      try {
+        const avatarUrl = await uploadAvatarToStorage(blob, userIdentity.browserId)
+        await updateUserProfile({ avatarUrl })
+        setHasDismissedAvatarPrompt(true)
+        setIsAvatarSetupOpen(false)
+        setIsManualAvatarEdit(false)
+      } catch (error) {
+        console.error('Error saving avatar:', error)
+        throw error
+      }
+    },
+    [updateUserProfile, userIdentity]
+  )
+
+  const handleAvatarSkip = useCallback(() => {
+    if (!userIdentity?.avatarUrl) {
+      setHasDismissedAvatarPrompt(true)
+    }
+    setIsAvatarSetupOpen(false)
+    setIsManualAvatarEdit(false)
+  }, [userIdentity])
+
+  const handleAvatarEdit = useCallback(() => {
+    setIsManualAvatarEdit(true)
+    setIsAvatarSetupOpen(true)
+  }, [])
 
   useEffect(() => {
     if (!excalidrawAPI) {
@@ -600,11 +655,15 @@ function App() {
               <span
                 role="listitem"
                 key={user.id}
-                className="online-avatar"
+                className={`online-avatar${user.avatarUrl ? ' online-avatar--image' : ''}`}
                 style={{ backgroundColor: user.color }}
                 title={user.username}
               >
-                {user.username?.charAt(0)?.toUpperCase() ?? '?'}
+                {user.avatarUrl ? (
+                  <img src={user.avatarUrl} alt={`${user.username ?? 'Guest'} avatar`} />
+                ) : (
+                  user.username?.charAt(0)?.toUpperCase() ?? '?'
+                )}
               </span>
             ))}
             {overflowCount > 0 && <span className="online-more">+{overflowCount}</span>}
@@ -689,15 +748,36 @@ function App() {
           </div>
         )}
         {userIdentity && (
-          <div className="user-id-display">
-            <span className="user-id-label">You are:</span>
-            <span
-              className="user-id-value"
-              style={{ color: userIdentity.color, fontWeight: 'bold' }}
+          <div className="user-card">
+            <button
+              type="button"
+              className={`user-card__portrait${userIdentity.avatarUrl ? ' user-card__portrait--image' : ''}`}
+              onClick={handleAvatarEdit}
+              aria-label={userIdentity.avatarUrl ? 'Edit avatar' : 'Add avatar'}
             >
-              {userIdentity.username}
-            </span>
-            {isAdmin && <span className="user-role-badge">Admin</span>}
+              {userIdentity.avatarUrl ? (
+                <img src={userIdentity.avatarUrl} alt={`${userIdentity.username} avatar`} />
+              ) : (
+                <span className="user-card__initial">
+                  {userIdentity.username?.charAt(0)?.toUpperCase() ?? '?'}
+                </span>
+              )}
+            </button>
+            <div className="user-card__footer">
+              <span className="user-card__label">You are</span>
+              <span
+                className="user-card__name"
+                style={{ color: userIdentity.color }}
+              >
+                {userIdentity.username}
+              </span>
+              <div className="user-card__meta">
+                {isAdmin && <span className="user-role-badge">Admin</span>}
+                <button type="button" className="user-card__edit" onClick={handleAvatarEdit}>
+                  {userIdentity.avatarUrl ? 'Edit avatar' : 'Add avatar'}
+                </button>
+              </div>
+            </div>
           </div>
         )}
         <Excalidraw
@@ -743,6 +823,13 @@ function App() {
           </div>
         </div>
       )}
+      <AvatarSetup
+        isOpen={isAvatarSetupOpen}
+        onSave={handleAvatarSave}
+        onSkip={handleAvatarSkip}
+        accentColor={userIdentity?.color}
+        initialAvatarUrl={userIdentity?.avatarUrl || null}
+      />
     </div>
   )
 }

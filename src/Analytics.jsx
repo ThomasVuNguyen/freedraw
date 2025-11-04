@@ -58,6 +58,7 @@ function Analytics() {
         ...session,
         sessionId,
         userId,
+        avatarUrl: session.avatarUrl || null,
       }))
       allSessions = [...allSessions, ...sessionsArray]
       totalSessions += sessionsArray.length
@@ -69,12 +70,17 @@ function Analytics() {
     const avgDuration =
       durations.length > 0 ? durations.reduce((a, b) => a + b, 0) / durations.length : 0
 
-    const userSessionCounts = Object.entries(sessions).map(([userId, userSessions]) => ({
-      userId,
-      count: Object.keys(userSessions || {}).length,
-      username: Object.values(userSessions || {})[0]?.username || 'Unknown',
-      color: Object.values(userSessions || {})[0]?.color || '#666',
-    }))
+    const userSessionCounts = Object.entries(sessions).map(([userId, userSessions]) => {
+      const sessionValues = Object.values(userSessions || {})
+      const representativeSession = sessionValues[0] || {}
+      return {
+        userId,
+        count: Object.keys(userSessions || {}).length,
+        username: representativeSession.username || 'Unknown',
+        color: representativeSession.color || '#666',
+        avatarUrl: representativeSession.avatarUrl || null,
+      }
+    })
     userSessionCounts.sort((a, b) => b.count - a.count)
     const mostActiveUser = userSessionCounts[0] || null
 
@@ -159,6 +165,7 @@ function Analytics() {
         username: u.username,
         sessions: u.count,
         color: u.color,
+        avatarUrl: u.avatarUrl || null,
       })),
     }
   }
@@ -244,14 +251,30 @@ function Analytics() {
         {metrics.mostActiveUser && (
           <div className="metric-card">
             <div className="metric-icon">🏆</div>
-            <div
-              className="metric-value"
-              style={{ color: metrics.mostActiveUser.color, fontSize: '1.2rem' }}
-            >
-              {metrics.mostActiveUser.username}
+            <div className="metric-most-active">
+              <div
+                className={`metric-most-active__avatar${
+                  metrics.mostActiveUser.avatarUrl ? ' metric-most-active__avatar--image' : ''
+                }`}
+                style={{ backgroundColor: metrics.mostActiveUser.color }}
+              >
+                {metrics.mostActiveUser.avatarUrl ? (
+                  <img src={metrics.mostActiveUser.avatarUrl} alt={`${metrics.mostActiveUser.username} avatar`} />
+                ) : (
+                  metrics.mostActiveUser.username?.charAt(0)?.toUpperCase() ?? '?'
+                )}
+              </div>
+              <div className="metric-most-active__meta">
+                <div
+                  className="metric-value"
+                  style={{ color: metrics.mostActiveUser.color, fontSize: '1.2rem' }}
+                >
+                  {metrics.mostActiveUser.username}
+                </div>
+                <div className="metric-sublabel">{metrics.mostActiveUser.count} sessions</div>
+              </div>
             </div>
             <div className="metric-label">Most Active User</div>
-            <div className="metric-sublabel">{metrics.mostActiveUser.count} sessions</div>
           </div>
         )}
       </div>
@@ -383,8 +406,15 @@ function Analytics() {
         <div className="users-list">
           {Object.values(presence).map((user) => (
             <div key={user.id} className="user-badge">
-              <div className="user-avatar" style={{ backgroundColor: user.color }}>
-                {user.username?.charAt(0)?.toUpperCase() || '?'}
+              <div
+                className={`user-avatar${user.avatarUrl ? ' user-avatar--image' : ''}`}
+                style={{ backgroundColor: user.color }}
+              >
+                {user.avatarUrl ? (
+                  <img src={user.avatarUrl} alt={`${user.username || 'User'} avatar`} />
+                ) : (
+                  user.username?.charAt(0)?.toUpperCase() || '?'
+                )}
               </div>
               <div className="user-info">
                 <div className="user-name">{user.username}</div>
@@ -421,8 +451,15 @@ function Analytics() {
             return (
               <div key={session.sessionId} className="table-row">
                 <div className="col-user">
-                  <div className="session-avatar" style={{ backgroundColor: session.color }}>
-                    {session.username?.charAt(0)?.toUpperCase() || '?'}
+                  <div
+                    className={`session-avatar${session.avatarUrl ? ' session-avatar--image' : ''}`}
+                    style={{ backgroundColor: session.color }}
+                  >
+                    {session.avatarUrl ? (
+                      <img src={session.avatarUrl} alt={`${session.username || 'User'} avatar`} />
+                    ) : (
+                      session.username?.charAt(0)?.toUpperCase() || '?'
+                    )}
                   </div>
                   <span>{session.username || 'Unknown'}</span>
                 </div>

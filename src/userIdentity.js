@@ -23,19 +23,42 @@ export function getBrowserId() {
   return id
 }
 
+const getStoredIdentity = () => {
+  const cachedIdentity = localStorage.getItem(USER_IDENTITY_KEY)
+  if (!cachedIdentity) {
+    return null
+  }
+  try {
+    const parsed = JSON.parse(cachedIdentity)
+    return {
+      ...parsed,
+      avatarUrl: parsed.avatarUrl || null,
+    }
+  } catch (error) {
+    console.error('Error parsing cached identity:', error)
+    return null
+  }
+}
+
+const saveIdentity = (identity) => {
+  if (!identity) {
+    return
+  }
+  const normalizedIdentity = {
+    ...identity,
+    avatarUrl: identity.avatarUrl || null,
+  }
+  localStorage.setItem(USER_IDENTITY_KEY, JSON.stringify(normalizedIdentity))
+}
+
 /**
  * Get or create user identity (username and color) from the API
- * @returns {Promise<{browserId: string, username: string, color: string}>}
+ * @returns {Promise<{browserId: string, username: string, color: string, avatarUrl: string | null}>}
  */
 export async function getOrCreateUserIdentity() {
-  // Check if we have a cached identity
-  const cachedIdentity = localStorage.getItem(USER_IDENTITY_KEY)
+  const cachedIdentity = getStoredIdentity()
   if (cachedIdentity) {
-    try {
-      return JSON.parse(cachedIdentity)
-    } catch (error) {
-      console.error('Error parsing cached identity:', error)
-    }
+    return cachedIdentity
   }
 
   // Get or create browser ID
@@ -60,10 +83,10 @@ export async function getOrCreateUserIdentity() {
       browserId,
       username: data.username,
       color: data.color,
+      avatarUrl: data.avatarUrl || null,
     }
 
-    // Cache the identity
-    localStorage.setItem(USER_IDENTITY_KEY, JSON.stringify(identity))
+    saveIdentity(identity)
 
     return identity
   } catch (error) {
@@ -74,7 +97,10 @@ export async function getOrCreateUserIdentity() {
       browserId,
       username: `user_${browserId.substring(0, 8)}`,
       color: generateFallbackColor(),
+      avatarUrl: null,
     }
+
+    saveIdentity(fallbackIdentity)
 
     return fallbackIdentity
   }
@@ -112,4 +138,23 @@ export function clearUserIdentity() {
   localStorage.removeItem(BROWSER_ID_KEY)
   // Also remove old user ID key if it exists
   localStorage.removeItem('freedraw_userId')
+}
+
+/**
+ * Update stored user identity with new values and return the merged result
+ * @param {Partial<{username: string, color: string, avatarUrl: string | null}>} updates
+ * @returns {{browserId: string, username: string, color: string, avatarUrl: string | null} | null}
+ */
+export function updateStoredUserIdentity(updates) {
+  const current = getStoredIdentity()
+  if (!current) {
+    return null
+  }
+  const nextIdentity = {
+    ...current,
+    ...updates,
+    avatarUrl: updates?.avatarUrl ?? current.avatarUrl ?? null,
+  }
+  saveIdentity(nextIdentity)
+  return nextIdentity
 }

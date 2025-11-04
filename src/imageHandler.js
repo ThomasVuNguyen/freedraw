@@ -118,3 +118,27 @@ export async function handleImageUpload(file, userId) {
 
   throw new Error('Invalid file type for upload')
 }
+
+/**
+ * Upload a user-created avatar to Firebase Storage and return its URL
+ * @param {Blob} blob - The avatar image blob
+ * @param {string} userId - The user ID
+ * @returns {Promise<string>} The download URL for the stored avatar
+ */
+export async function uploadAvatarToStorage(blob, userId) {
+  if (!(blob instanceof Blob)) {
+    throw new Error('Avatar upload expects a Blob')
+  }
+
+  const timestamp = Date.now()
+  const fileName = `${userId}/${timestamp}.png`
+  const avatarRef = ref(storage, `avatars/${fileName}`)
+
+  const contentType = blob.type || 'image/png'
+
+  const snapshot = await uploadBytes(avatarRef, blob, {
+    contentType,
+  })
+
+  return getDownloadURL(snapshot.ref)
+}

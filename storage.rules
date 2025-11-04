@@ -12,5 +12,11 @@ service firebase.storage {
       allow write: if request.resource.size < 10 * 1024 * 1024 // 10MB max
                    && request.resource.contentType.matches('image/.*');
     }
+
+    match /avatars/{allPaths=**} {
+      allow read: if true;
+      allow write: if request.resource.size < 2 * 1024 * 1024 // 2MB max
+                   && request.resource.contentType.matches('image/.*');
+    }
   }
 }
