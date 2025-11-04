@@ -18,7 +18,7 @@ import { useCollaboration } from './useCollaboration'
 import { handleImageUpload, uploadAvatarToStorage } from './imageHandler'
 import AvatarSetup from './AvatarSetup'
 
-const APP_NAME = 'Arcadia'
+const APP_NAME = 'arcadia'
 
 // Version info injected at build time
 const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev'
@@ -46,6 +46,8 @@ function App() {
   const [isAvatarSetupOpen, setIsAvatarSetupOpen] = useState(false)
   const [hasDismissedAvatarPrompt, setHasDismissedAvatarPrompt] = useState(false)
   const [isManualAvatarEdit, setIsManualAvatarEdit] = useState(false)
+  const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const menuRef = useRef(null)
 
   // Enable real-time collaboration
   const {
@@ -96,6 +98,60 @@ function App() {
   const handleViewToggle = useCallback(() => {
     setViewMode((current) => !current)
   }, [])
+
+  const closeMenu = useCallback(() => {
+    setIsMenuOpen(false)
+  }, [])
+
+  const handleMenuToggle = useCallback(() => {
+    setIsMenuOpen((previous) => !previous)
+  }, [])
+
+  const handleMenuThemeToggle = useCallback(() => {
+    handleThemeToggle()
+    closeMenu()
+  }, [handleThemeToggle, closeMenu])
+
+  const handleMenuGridToggle = useCallback(() => {
+    handleGridToggle()
+    closeMenu()
+  }, [handleGridToggle, closeMenu])
+
+  const handleMenuViewToggle = useCallback(() => {
+    handleViewToggle()
+    closeMenu()
+  }, [handleViewToggle, closeMenu])
+
+  useEffect(() => {
+    if (!isMenuOpen) {
+      return undefined
+    }
+
+    const handleClickOutside = (event) => {
+      if (!menuRef.current) {
+        return
+      }
+      if (!menuRef.current.contains(event.target)) {
+        closeMenu()
+      }
+    }
+
+    const handleEscape = (event) => {
+      if (event.key === 'Escape') {
+        closeMenu()
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    document.addEventListener('touchstart', handleClickOutside)
+    document.addEventListener('keydown', handleEscape)
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('touchstart', handleClickOutside)
+      document.removeEventListener('keydown', handleEscape)
+    }
+  }, [isMenuOpen, closeMenu])
 
   useEffect(() => {
     if (!excalidrawAPI || !userIdentity?.color) {
@@ -252,6 +308,11 @@ function App() {
       },
     })
   }, [excalidrawAPI])
+
+  const handleMenuSearchToggle = useCallback(() => {
+    handleSearchToggle()
+    closeMenu()
+  }, [handleSearchToggle, closeMenu])
 
   const handleAvatarSave = useCallback(
     async (blob) => {
@@ -632,114 +693,75 @@ function App() {
 
   return (
     <div className={`app app-${theme}`}>
-      <header className="toolbar">
-        <h1>
-          {APP_NAME}
-          <span className="version-info">
-            v{APP_VERSION}
-          </span>
-        </h1>
-
-        <div
-          className="online-indicator"
-          aria-live="polite"
-          aria-label={`${onlineCount} ${onlineCount === 1 ? 'person online' : 'people online'}`}
+      <div className="floating-brand" ref={menuRef}>
+        <button
+          type="button"
+          className={`brand-trigger${isMenuOpen ? ' brand-trigger--open' : ''}`}
+          onClick={handleMenuToggle}
+          aria-expanded={isMenuOpen}
+          aria-controls="brand-menu"
         >
-          <span className="online-dot" />
-          <span className="online-count">
-            <span className="online-count-number">{onlineCount}</span>
-            <span className="online-count-label">online</span>
-          </span>
-          <div className="online-avatars" role="list">
-            {visibleOnlineUsers.map((user) => (
-              <span
-                role="listitem"
-                key={user.id}
-                className={`online-avatar${user.avatarUrl ? ' online-avatar--image' : ''}`}
-                style={{ backgroundColor: user.color }}
-                title={user.username}
-              >
-                {user.avatarUrl ? (
-                  <img src={user.avatarUrl} alt={`${user.username ?? 'Guest'} avatar`} />
-                ) : (
-                  user.username?.charAt(0)?.toUpperCase() ?? '?'
-                )}
-              </span>
-            ))}
-            {overflowCount > 0 && <span className="online-more">+{overflowCount}</span>}
+          <img
+            src="/arcadia-icon.png"
+            alt="Arcadia logo"
+            className="brand-trigger__logo"
+            width="40"
+            height="40"
+          />
+          <div className="brand-trigger__title">
+            <span className="brand-trigger__name">{APP_NAME}</span>
+            <span className="version-info">v{APP_VERSION}</span>
+          </div>
+        </button>
+        <div
+          id="brand-menu"
+          className={`brand-menu${isMenuOpen ? ' brand-menu--open' : ''}`}
+          aria-hidden={!isMenuOpen}
+        >
+          <div className="brand-menu__section brand-menu__actions">
+            <button
+              type="button"
+              className={`brand-menu__item${isSearchOpen ? ' brand-menu__item--active' : ''}`}
+              onClick={handleMenuSearchToggle}
+            >
+              <MagnifyingGlass size={18} weight={isSearchOpen ? 'fill' : 'regular'} />
+              <span>{isSearchOpen ? 'Close search' : 'Open search'}</span>
+            </button>
+            <button
+              type="button"
+              className="brand-menu__item"
+              onClick={handleMenuThemeToggle}
+            >
+              {theme === 'light' ? <MoonStars size={18} weight="fill" /> : <Sun size={18} weight="fill" />}
+              <span>{theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}</span>
+            </button>
+            <button
+              type="button"
+              className={`brand-menu__item${gridMode ? ' brand-menu__item--active' : ''}`}
+              onClick={handleMenuGridToggle}
+            >
+              <GridFour size={18} weight={gridMode ? 'fill' : 'regular'} />
+              <span>{gridMode ? 'Hide grid' : 'Show grid'}</span>
+            </button>
+            <button
+              type="button"
+              className={`brand-menu__item${viewMode ? ' brand-menu__item--active' : ''}`}
+              onClick={handleMenuViewToggle}
+            >
+              {viewMode ? <EyeSlash size={18} weight="fill" /> : <Eye size={18} weight="regular" />}
+              <span>{viewMode ? 'Exit view mode' : 'Enter view mode'}</span>
+            </button>
+            <a
+              href="/analytics"
+              className="brand-menu__item brand-menu__item--link"
+              onClick={closeMenu}
+            >
+              <ChartLineUp size={18} weight="regular" />
+              <span>Open analytics</span>
+            </a>
           </div>
         </div>
-
-        <div className="toolbar-controls">
-          <button
-            type="button"
-            className={`icon-button ${isSearchOpen ? 'icon-button--active' : ''}`}
-            onClick={handleSearchToggle}
-            aria-label={isSearchOpen ? 'Close Search' : 'Search Canvas'}
-            title={isSearchOpen ? 'Close Search' : 'Search Canvas'}
-          >
-            <MagnifyingGlass size={20} weight={isSearchOpen ? 'fill' : 'regular'} />
-          </button>
-          <button
-            type="button"
-            className="icon-button"
-            onClick={handleThemeToggle}
-            aria-label={`Toggle ${theme === 'light' ? 'Dark' : 'Light'} Mode`}
-            title={`Toggle ${theme === 'light' ? 'Dark' : 'Light'} Mode`}
-          >
-            {theme === 'light' ? <MoonStars size={20} weight="fill" /> : <Sun size={20} weight="fill" />}
-          </button>
-          <button
-            type="button"
-            className="icon-button"
-            onClick={handleGridToggle}
-            aria-label={gridMode ? 'Hide Grid' : 'Show Grid'}
-            title={gridMode ? 'Hide Grid' : 'Show Grid'}
-          >
-            <GridFour size={20} weight={gridMode ? 'fill' : 'regular'} />
-          </button>
-          <button
-            type="button"
-            className="icon-button"
-            onClick={handleViewToggle}
-            aria-label={viewMode ? 'Exit View Mode' : 'Enter View Mode'}
-            title={viewMode ? 'Exit View Mode' : 'Enter View Mode'}
-          >
-            {viewMode ? <EyeSlash size={20} weight="fill" /> : <Eye size={20} weight="regular" />}
-          </button>
-          {/*
-          <button
-            type="button"
-            className="icon-button"
-            onClick={handleZenToggle}
-            aria-label={zenMode ? 'Exit Zen Mode' : 'Enter Zen Mode'}
-            title={zenMode ? 'Exit Zen Mode' : 'Enter Zen Mode'}
-          >
-            {zenMode ? <ArrowsOutSimple size={20} weight="fill" /> : <ArrowsInSimple size={20} weight="regular" />}
-          </button>
-          */}
-          {/*
-          <button
-            type="button"
-            className="icon-button"
-            onClick={handleResetScene}
-            disabled={!userIdentity || !excalidrawAPI}
-            aria-label="Clear My Items"
-            title="Clear My Items"
-          >
-            <Broom size={20} weight="regular" />
-          </button>
-          */}
-          <a
-            href="/analytics"
-            className="analytics-link icon-link"
-            aria-label="Analytics"
-            title="Analytics"
-          >
-            <ChartLineUp size={20} weight="regular" />
-          </a>
-        </div>
-      </header>
+      </div>
 
       <main className="canvas-area">
         {!isLoaded && (
@@ -748,35 +770,66 @@ function App() {
           </div>
         )}
         {userIdentity && (
-          <div className="user-card">
-            <button
-              type="button"
-              className={`user-card__portrait${userIdentity.avatarUrl ? ' user-card__portrait--image' : ''}`}
-              onClick={handleAvatarEdit}
-              aria-label={userIdentity.avatarUrl ? 'Edit avatar' : 'Add avatar'}
-            >
-              {userIdentity.avatarUrl ? (
-                <img src={userIdentity.avatarUrl} alt={`${userIdentity.username} avatar`} />
-              ) : (
-                <span className="user-card__initial">
-                  {userIdentity.username?.charAt(0)?.toUpperCase() ?? '?'}
-                </span>
-              )}
-            </button>
-            <div className="user-card__footer">
-              <span className="user-card__label">You are</span>
-              <span
-                className="user-card__name"
-                style={{ color: userIdentity.color }}
+          <div className="user-hud">
+            <div className="user-card">
+              <button
+                type="button"
+                className={`user-card__portrait${userIdentity.avatarUrl ? ' user-card__portrait--image' : ''}`}
+                onClick={handleAvatarEdit}
+                aria-label={userIdentity.avatarUrl ? 'Edit avatar' : 'Add avatar'}
               >
-                {userIdentity.username}
-              </span>
-              <div className="user-card__meta">
-                {isAdmin && <span className="user-role-badge">Admin</span>}
-                <button type="button" className="user-card__edit" onClick={handleAvatarEdit}>
-                  {userIdentity.avatarUrl ? 'Edit avatar' : 'Add avatar'}
-                </button>
+                {userIdentity.avatarUrl ? (
+                  <img src={userIdentity.avatarUrl} alt={`${userIdentity.username} avatar`} />
+                ) : (
+                  <span className="user-card__initial">
+                    {userIdentity.username?.charAt(0)?.toUpperCase() ?? '?'}
+                  </span>
+                )}
+              </button>
+              <div className="user-card__footer">
+                <span className="user-card__label">You are</span>
+                <span
+                  className="user-card__name"
+                  style={{ color: userIdentity.color }}
+                >
+                  {userIdentity.username}
+                </span>
+                <div className="user-card__meta">
+                  {isAdmin && <span className="user-role-badge">Admin</span>}
+                  <button type="button" className="user-card__edit" onClick={handleAvatarEdit}>
+                    {userIdentity.avatarUrl ? 'Edit avatar' : 'Add avatar'}
+                  </button>
+                </div>
               </div>
+            </div>
+            <div className="presence-pill" aria-live="polite">
+              <span className="presence-pill__dot" />
+              <div className="presence-pill__counts">
+                <span className="presence-pill__number">{onlineCount}</span>
+                <span className="presence-pill__label">
+                  {onlineCount === 1 ? 'online' : 'online'}
+                </span>
+              </div>
+              {visibleOnlineUsers.length > 0 && (
+                <div className="presence-pill__avatars" role="list">
+                  {visibleOnlineUsers.map((user) => (
+                    <span
+                      role="listitem"
+                      key={user.id}
+                      className={`presence-pill__avatar${user.avatarUrl ? ' presence-pill__avatar--image' : ''}`}
+                      style={{ backgroundColor: user.color }}
+                      title={user.username}
+                    >
+                      {user.avatarUrl ? (
+                        <img src={user.avatarUrl} alt={`${user.username ?? 'Guest'} avatar`} />
+                      ) : (
+                        user.username?.charAt(0)?.toUpperCase() ?? '?'
+                      )}
+                    </span>
+                  ))}
+                  {overflowCount > 0 && <span className="presence-pill__more">+{overflowCount}</span>}
+                </div>
+              )}
             </div>
           </div>
         )}
