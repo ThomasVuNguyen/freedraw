@@ -46,7 +46,7 @@ function App() {
   })
   const [isSearchOpen, setIsSearchOpen] = useState(false)
   const [isAvatarSetupOpen, setIsAvatarSetupOpen] = useState(false)
-  const [hasDismissedAvatarPrompt, setHasDismissedAvatarPrompt] = useState(false)
+  const [hasDismissedAvatarPrompt, setHasDismissedAvatarPrompt] = useState(true)
   const [isManualAvatarEdit, setIsManualAvatarEdit] = useState(false)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const menuRef = useRef(null)
