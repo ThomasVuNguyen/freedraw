@@ -8,7 +8,7 @@ const PRESENCE_PATH = 'presence/users'
 const SESSIONS_PATH = 'sessions'
 const ADMIN_PATH = 'roles/admins'
 const HEARTBEAT_INTERVAL = 20000
-const CANVAS_POLL_INTERVAL = 10000
+const CANVAS_POLL_INTERVAL = 2000
 
 const cloneElement = (element) => {
   if (typeof structuredClone === 'function') {
@@ -46,6 +46,7 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
   const flushPendingSaveRef = useRef(null)
   const canvasPollRef = useRef(null)
   const isFetchingCanvasRef = useRef(false)
+  const debounceSaveTimerRef = useRef(null)
 
   useEffect(() => {
     const presenceListRef = ref(database, PRESENCE_PATH)
@@ -267,23 +268,34 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
                 }
               }
 
-              // If there's a pending save (user just pasted/created something),
-              // merge Firebase elements with local elements that don't exist in Firebase yet
+              // If there's a pending save, intelligently merge Firebase and local elements
               let elementsToRender = sceneData.elements
               if (hasPendingSaveRef.current) {
-                // Get current elements from the canvas (includes pastes that haven't been processed yet)
                 const currentCanvasElements = excalidrawAPI.getSceneElements()
-                const firebaseIds = new Set(sceneData.elements.map(el => el.id))
-                const localOnlyElements = currentCanvasElements.filter(el => !firebaseIds.has(el.id))
+                const firebaseMap = new Map(sceneData.elements.map(el => [el.id, el]))
+                const mergedElements = []
 
-                if (localOnlyElements.length > 0) {
-                  console.log(`Preserving ${localOnlyElements.length} local element(s) during Firebase sync`)
-                  // Add createdBy metadata to local elements
-                  const taggedLocalElements = localOnlyElements.map(el =>
-                    decorateElementWithOwner(el)
-                  )
-                  elementsToRender = [...sceneData.elements, ...taggedLocalElements]
+                // First, add all Firebase elements, but prefer local version if newer
+                for (const fbElement of sceneData.elements) {
+                  const localElement = currentCanvasElements.find(el => el.id === fbElement.id)
+                  if (localElement && localElement.version > fbElement.version) {
+                    // Local version is newer, keep it
+                    mergedElements.push(localElement)
+                  } else {
+                    // Firebase version is newer or same, use it
+                    mergedElements.push(fbElement)
+                  }
                 }
+
+                // Then add any local-only elements (new elements not yet in Firebase)
+                const localOnlyElements = currentCanvasElements.filter(el => !firebaseMap.has(el.id))
+                if (localOnlyElements.length > 0) {
+                  console.log(`Preserving ${localOnlyElements.length} local-only element(s) during sync`)
+                  const taggedLocalElements = localOnlyElements.map(el => decorateElementWithOwner(el))
+                  mergedElements.push(...taggedLocalElements)
+                }
+
+                elementsToRender = mergedElements
               }
 
               const updateData = filesToLoad
@@ -387,6 +399,12 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
             console.log('flushPendingSave skipped after lock release', { reason })
           }
           return null
+        }
+
+        // Clear any pending debounced save timer since we're saving now
+        if (debounceSaveTimerRef.current) {
+          clearTimeout(debounceSaveTimerRef.current)
+          debounceSaveTimerRef.current = null
         }
 
         isSavingRef.current = true
@@ -528,13 +546,27 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
           const owner = previousElement.customData?.createdBy
 
           if (userIsAdmin || !owner || owner === userId) {
+            // User can edit their own elements or admin can edit anything
             assignOwnerMetadata(clonedElement, owner ?? userId)
+            authorizedElements[index] = clonedElement
           } else {
-            // Preserve original owner metadata while letting collaborators modify the element
-            assignOwnerMetadata(clonedElement, owner)
+            // User tried to modify someone else's element - revert to previous version
+            console.log(`User ${userId} attempted to modify element ${element.id} owned by ${owner}`)
+            authorizedElements[index] = previousElement
           }
+        }
 
-          authorizedElements[index] = clonedElement
+        // Check for deleted elements - restore any that weren't owned by this user
+        const currentElementIds = new Set(elements.map(el => el.id))
+        for (const prevElement of previousElements) {
+          if (!currentElementIds.has(prevElement.id) && !prevElement.isDeleted) {
+            const owner = prevElement.customData?.createdBy
+            // If element was deleted and user doesn't own it and isn't admin, restore it
+            if (owner && owner !== userId && !userIsAdmin) {
+              console.log(`Restoring deleted element ${prevElement.id} owned by ${owner}`)
+              authorizedElements.push(prevElement)
+            }
+          }
         }
 
         previousSceneRef.current = cloneElements(authorizedElements)
@@ -549,6 +581,19 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
         if (isSavingRef.current) {
           needsResaveRef.current = true
         }
+
+        // Debounced save: trigger save 500ms after user stops editing
+        if (debounceSaveTimerRef.current) {
+          clearTimeout(debounceSaveTimerRef.current)
+        }
+        debounceSaveTimerRef.current = setTimeout(() => {
+          debounceSaveTimerRef.current = null // Clear timer so polling can resume
+          // Only trigger save if not already saving (prevents race with post-save)
+          if (flushPendingSaveRef.current && hasPendingSaveRef.current && !isSavingRef.current) {
+            console.log('Triggering debounced save')
+            flushPendingSaveRef.current({ reason: 'debounced', allowRetry: true })
+          }
+        }, 500)
       }
 
       const unsubscribeChange = excalidrawAPI.onChange(handleChange)
@@ -559,6 +604,11 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
         if (heartbeatRef.current) {
           clearInterval(heartbeatRef.current)
           heartbeatRef.current = null
+        }
+
+        if (debounceSaveTimerRef.current) {
+          clearTimeout(debounceSaveTimerRef.current)
+          debounceSaveTimerRef.current = null
         }
 
         if (sessionRefRef.current) {
