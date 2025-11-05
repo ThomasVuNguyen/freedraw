@@ -535,12 +535,6 @@
   box-shadow: none;
 }
 
-.save-controls__status {
-  font-size: 0.7rem;
-  color: var(--surface-foreground);
-  opacity: 0.75;
-}
-
 .user-tray--open .user-tray__panel,
 .user-tray:hover .user-tray__panel,
 .user-tray:focus-within .user-tray__panel {

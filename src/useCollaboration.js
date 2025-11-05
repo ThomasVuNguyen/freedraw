@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { onDisconnect, onValue, push, ref, serverTimestamp, set, update } from 'firebase/database'
+import { get, onDisconnect, onValue, push, ref, serverTimestamp, set, update } from 'firebase/database'
 import { database } from './firebase'
 import { getOrCreateUserIdentity, updateStoredUserIdentity } from './userIdentity'
 
@@ -8,6 +8,7 @@ const PRESENCE_PATH = 'presence/users'
 const SESSIONS_PATH = 'sessions'
 const ADMIN_PATH = 'roles/admins'
 const HEARTBEAT_INTERVAL = 20000
+const CANVAS_POLL_INTERVAL = 10000
 
 const cloneElement = (element) => {
   if (typeof structuredClone === 'function') {
@@ -42,6 +43,8 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
   const lastSaveStartedAtRef = useRef(0)
   const needsResaveRef = useRef(false)
   const flushPendingSaveRef = useRef(null)
+  const canvasPollRef = useRef(null)
+  const isFetchingCanvasRef = useRef(false)
 
   useEffect(() => {
     const presenceListRef = ref(database, PRESENCE_PATH)
@@ -208,91 +211,119 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
       sendHeartbeat()
       heartbeatRef.current = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL)
 
-      const unsubscribeCanvas = onValue(canvasRef, (snapshot) => {
-        const data = snapshot.val()
+      const fetchCanvasState = async (reason = 'poll') => {
+        if (!excalidrawAPI) {
+          return
+        }
 
-        if (data && !isSyncingRef.current) {
-          try {
-            const sceneData = JSON.parse(data.sceneJSON)
+        if (isFetchingCanvasRef.current) {
+          return
+        }
 
-            console.log('Loading from Firebase:', {
-              elementCount: sceneData.elements?.length || 0,
-              fileCount: data.files ? Object.keys(JSON.parse(data.files)).length : 0,
-            })
+        isFetchingCanvasRef.current = true
 
-            isSyncingRef.current = true
-            isApplyingSceneUpdateRef.current = true
+        try {
+          const snapshot = await get(canvasRef)
+          const data = snapshot.exists() ? snapshot.val() : null
 
-            let filesToLoad = null
-            if (data.files) {
-              try {
-                const files = JSON.parse(data.files)
-                if (Object.keys(files).length > 0) {
-                  filesToLoad = files
-                  if (pendingFilesRef) {
-                    pendingFilesRef.current = {
-                      ...pendingFilesRef.current,
-                      ...files,
+          if (data && !isSyncingRef.current) {
+            try {
+              const sceneData = JSON.parse(data.sceneJSON)
+
+              console.log('Loading from Firebase:', {
+                elementCount: sceneData.elements?.length || 0,
+                fileCount: data.files ? Object.keys(JSON.parse(data.files)).length : 0,
+                reason,
+              })
+
+              isSyncingRef.current = true
+              isApplyingSceneUpdateRef.current = true
+
+              let filesToLoad = null
+              if (data.files) {
+                try {
+                  const files = JSON.parse(data.files)
+                  if (Object.keys(files).length > 0) {
+                    filesToLoad = files
+                    if (pendingFilesRef) {
+                      pendingFilesRef.current = {
+                        ...pendingFilesRef.current,
+                        ...files,
+                      }
                     }
+                    console.log('Files loaded from Firebase:', Object.keys(files).length)
                   }
-                  console.log('Files loaded from Firebase:', Object.keys(files).length)
+                } catch (error) {
+                  console.error('Error parsing files:', error)
                 }
-              } catch (error) {
-                console.error('Error parsing files:', error)
               }
-            }
 
-            // If there's a pending save (user just pasted/created something),
-            // merge Firebase elements with local elements that don't exist in Firebase yet
-            let elementsToRender = sceneData.elements
-            if (hasPendingSaveRef.current) {
-              // Get current elements from the canvas (includes pastes that haven't been processed yet)
-              const currentCanvasElements = excalidrawAPI.getSceneElements()
-              const firebaseIds = new Set(sceneData.elements.map(el => el.id))
-              const localOnlyElements = currentCanvasElements.filter(el => !firebaseIds.has(el.id))
+              // If there's a pending save (user just pasted/created something),
+              // merge Firebase elements with local elements that don't exist in Firebase yet
+              let elementsToRender = sceneData.elements
+              if (hasPendingSaveRef.current) {
+                // Get current elements from the canvas (includes pastes that haven't been processed yet)
+                const currentCanvasElements = excalidrawAPI.getSceneElements()
+                const firebaseIds = new Set(sceneData.elements.map(el => el.id))
+                const localOnlyElements = currentCanvasElements.filter(el => !firebaseIds.has(el.id))
 
-              if (localOnlyElements.length > 0) {
-                console.log(`Preserving ${localOnlyElements.length} local element(s) during Firebase sync`)
-                // Add createdBy metadata to local elements
-                const taggedLocalElements = localOnlyElements.map(el =>
-                  decorateElementWithOwner(el)
-                )
-                elementsToRender = [...sceneData.elements, ...taggedLocalElements]
+                if (localOnlyElements.length > 0) {
+                  console.log(`Preserving ${localOnlyElements.length} local element(s) during Firebase sync`)
+                  // Add createdBy metadata to local elements
+                  const taggedLocalElements = localOnlyElements.map(el =>
+                    decorateElementWithOwner(el)
+                  )
+                  elementsToRender = [...sceneData.elements, ...taggedLocalElements]
+                }
               }
-            }
 
-            const updateData = filesToLoad
-              ? { elements: elementsToRender, appState: sceneData.appState, files: filesToLoad }
-              : { elements: elementsToRender, appState: sceneData.appState }
+              const updateData = filesToLoad
+                ? { elements: elementsToRender, appState: sceneData.appState, files: filesToLoad }
+                : { elements: elementsToRender, appState: sceneData.appState }
 
-            excalidrawAPI.updateScene(updateData)
+              excalidrawAPI.updateScene(updateData)
 
-            previousSceneRef.current = cloneElements(elementsToRender)
+              previousSceneRef.current = cloneElements(elementsToRender)
 
-            setTimeout(() => {
+              setTimeout(() => {
+                isSyncingRef.current = false
+                isApplyingSceneUpdateRef.current = false
+              }, 500)
+
+              if (!isLoaded) {
+                setIsLoaded(true)
+              }
+
+              hasLoadedInitialDataRef.current = true
+            } catch (error) {
+              console.error('Error loading canvas from Firebase:', error)
+              hasLoadedInitialDataRef.current = true
               isSyncingRef.current = false
               isApplyingSceneUpdateRef.current = false
-            }, 500)
-
+            }
+          } else if (!data) {
             if (!isLoaded) {
               setIsLoaded(true)
             }
-
             hasLoadedInitialDataRef.current = true
-          } catch (error) {
-            console.error('Error loading canvas from Firebase:', error)
-            hasLoadedInitialDataRef.current = true
-            isSyncingRef.current = false
-            isApplyingSceneUpdateRef.current = false
           }
-        } else if (!data) {
-          console.log('No data in Firebase, starting fresh')
-          if (!isLoaded) {
-            setIsLoaded(true)
-          }
-          hasLoadedInitialDataRef.current = true
+        } catch (error) {
+          console.error('Error fetching canvas from Firebase:', error)
+        } finally {
+          isFetchingCanvasRef.current = false
         }
-      })
+      }
+
+      // Load canvas immediately, then poll every 10 seconds
+      await fetchCanvasState('initial')
+
+      if (!canvasPollRef.current) {
+        canvasPollRef.current = setInterval(() => {
+          fetchCanvasState('poll').catch((error) => {
+            console.error('Canvas poll failed:', error)
+          })
+        }, CANVAS_POLL_INTERVAL)
+      }
 
       const flushPendingSave = (options = {}) => {
         const { reason = 'manual', allowRetry = true } = options
@@ -537,7 +568,12 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
         window.removeEventListener('beforeunload', handlePageHide)
 
         presenceRefRef.current = null
-        unsubscribeCanvas()
+
+        if (canvasPollRef.current) {
+          clearInterval(canvasPollRef.current)
+          canvasPollRef.current = null
+        }
+
         if (unsubscribeChange) {
           unsubscribeChange()
         }

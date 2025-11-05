@@ -1,6 +1,6 @@
 /* global __APP_VERSION__ */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Excalidraw } from '@excalidraw/excalidraw'
 import {
   MoonStars,
@@ -67,7 +67,6 @@ function App() {
     saveChanges,
     isSaving,
     hasPendingChanges,
-    lastSavedAt,
   } = useCollaboration(
     excalidrawAPI,
     pendingFilesRef
@@ -85,18 +84,6 @@ function App() {
     }
   }, [saveChanges])
 
-  const lastSavedLabel = useMemo(() => {
-    if (!lastSavedAt) {
-      return null
-    }
-    try {
-      return new Date(lastSavedAt).toLocaleTimeString()
-    } catch (error) {
-      console.error('Error formatting last saved timestamp:', error)
-      return null
-    }
-  }, [lastSavedAt])
-
   useEffect(() => {
     if (!saveChanges) {
       return undefined
@@ -111,7 +98,7 @@ function App() {
           })
         }
       }
-    }, 30000)
+    }, 10000)
 
     return () => {
       clearInterval(interval)
@@ -950,15 +937,6 @@ function App() {
                   >
                     {isSaving ? 'Saving…' : hasPendingChanges ? 'Save changes' : 'Save'}
                   </button>
-                  <span className="save-controls__status">
-                    {isSaving
-                      ? 'Saving to shared canvas…'
-                      : hasPendingChanges
-                        ? 'Unsaved changes'
-                        : lastSavedLabel
-                          ? `Last saved ${lastSavedLabel}`
-                          : 'No changes yet'}
-                  </span>
                 </div>
                 <div className="presence-summary" aria-live="polite">
                   <span className="presence-summary__dot" />
