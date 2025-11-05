@@ -67,10 +67,14 @@ function App() {
     saveChanges,
     isSaving,
     hasPendingChanges,
+    lastSyncInfo,
   } = useCollaboration(
     excalidrawAPI,
     pendingFilesRef
   )
+
+  const syncIndicatorVariant = lastSyncInfo?.hadRemoteUpdates ? 'active' : 'idle'
+  const syncIndicatorKey = lastSyncInfo?.timestamp ?? null
 
   const handleManualSave = useCallback(() => {
     if (!saveChanges) {
@@ -911,6 +915,13 @@ function App() {
       )}
 
       <main className="canvas-area">
+        {syncIndicatorKey && (
+          <div
+            key={syncIndicatorKey}
+            className={`sync-indicator sync-indicator--${syncIndicatorVariant}`}
+            aria-hidden="true"
+          />
+        )}
         {!isLoaded && (
           <div className="loading-overlay">
             <div className="loading-message">Loading shared canvas...</div>

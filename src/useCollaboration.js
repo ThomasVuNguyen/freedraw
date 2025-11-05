@@ -27,6 +27,7 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
   const [hasPendingChanges, setHasPendingChanges] = useState(false)
   const [isSavingScene, setIsSavingScene] = useState(false)
   const [lastSavedAt, setLastSavedAt] = useState(null)
+  const [lastSyncInfo, setLastSyncInfo] = useState(null)
   const presenceRefRef = useRef(null)
   const userIdRef = useRef(null)
   const isSyncingRef = useRef(false)
@@ -211,6 +212,14 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
       sendHeartbeat()
       heartbeatRef.current = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL)
 
+      const markSyncComplete = (reason = 'poll', hadRemoteUpdates = false) => {
+        setLastSyncInfo({
+          reason,
+          hadRemoteUpdates,
+          timestamp: Date.now(),
+        })
+      }
+
       const fetchCanvasState = async (reason = 'poll') => {
         if (!excalidrawAPI) {
           return
@@ -285,6 +294,8 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
 
               previousSceneRef.current = cloneElements(elementsToRender)
 
+              markSyncComplete(reason, true)
+
               setTimeout(() => {
                 isSyncingRef.current = false
                 isApplyingSceneUpdateRef.current = false
@@ -305,6 +316,7 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
             if (!isLoaded) {
               setIsLoaded(true)
             }
+            markSyncComplete(reason, false)
             hasLoadedInitialDataRef.current = true
           }
         } catch (error) {
@@ -704,5 +716,6 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
     isSaving: isSavingScene,
     hasPendingChanges,
     lastSavedAt,
+    lastSyncInfo,
   }
 }
