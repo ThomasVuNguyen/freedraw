@@ -125,6 +125,17 @@ function App() {
         return
       }
 
+      // Excalidraw automatically inverts very light and dark colors based on theme
+      // To prevent Paper and Charcoal from swapping in dark mode, we pre-swap them
+      let actualColor = color
+      if (theme === 'dark') {
+        if (color === '#F3F1E4') { // Paper in light mode -> Charcoal for dark mode
+          actualColor = '#212121'
+        } else if (color === '#212121') { // Charcoal in light mode -> Paper for dark mode
+          actualColor = '#F3F1E4'
+        }
+      }
+
       if (colorMode === 'stroke') {
         setSelectedColor(color)
       } else {
@@ -144,7 +155,7 @@ function App() {
             if (colorMode === 'stroke') {
               return {
                 ...element,
-                strokeColor: color,
+                strokeColor: actualColor,
                 version: element.version + 1,
                 versionNonce: Math.floor(Math.random() * 2 ** 31),
               }
@@ -152,7 +163,7 @@ function App() {
               // Background mode
               return {
                 ...element,
-                backgroundColor: color,
+                backgroundColor: actualColor,
                 version: element.version + 1,
                 versionNonce: Math.floor(Math.random() * 2 ** 31),
               }
@@ -164,21 +175,21 @@ function App() {
         excalidrawAPI.updateScene({
           elements: updatedElements,
           appState: {
-            currentItemStrokeColor: colorMode === 'stroke' ? color : appState.currentItemStrokeColor,
-            currentItemBackgroundColor: colorMode === 'background' ? color : appState.currentItemBackgroundColor,
+            currentItemStrokeColor: colorMode === 'stroke' ? actualColor : appState.currentItemStrokeColor,
+            currentItemBackgroundColor: colorMode === 'background' ? actualColor : appState.currentItemBackgroundColor,
           },
         })
       } else {
         // No selection, just update the current color for new elements
         excalidrawAPI.updateScene({
           appState: {
-            currentItemStrokeColor: colorMode === 'stroke' ? color : appState.currentItemStrokeColor,
-            currentItemBackgroundColor: colorMode === 'background' ? color : appState.currentItemBackgroundColor,
+            currentItemStrokeColor: colorMode === 'stroke' ? actualColor : appState.currentItemStrokeColor,
+            currentItemBackgroundColor: colorMode === 'background' ? actualColor : appState.currentItemBackgroundColor,
           },
         })
       }
     },
-    [excalidrawAPI, colorMode]
+    [excalidrawAPI, colorMode, theme]
   )
 
   useEffect(() => {
