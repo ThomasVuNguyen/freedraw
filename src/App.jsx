@@ -1,6 +1,6 @@
 /* global __APP_VERSION__ */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Excalidraw } from '@excalidraw/excalidraw'
 import {
   MoonStars,
@@ -64,10 +64,59 @@ function App() {
     isAdmin,
     updateCursorPosition,
     updateUserProfile,
+    saveChanges,
+    isSaving,
+    hasPendingChanges,
+    lastSavedAt,
   } = useCollaboration(
     excalidrawAPI,
     pendingFilesRef
   )
+
+  const handleManualSave = useCallback(() => {
+    if (!saveChanges) {
+      return
+    }
+    const result = saveChanges('manual')
+    if (result && typeof result.then === 'function') {
+      result.catch((error) => {
+        console.error('Manual save failed:', error)
+      })
+    }
+  }, [saveChanges])
+
+  const lastSavedLabel = useMemo(() => {
+    if (!lastSavedAt) {
+      return null
+    }
+    try {
+      return new Date(lastSavedAt).toLocaleTimeString()
+    } catch (error) {
+      console.error('Error formatting last saved timestamp:', error)
+      return null
+    }
+  }, [lastSavedAt])
+
+  useEffect(() => {
+    if (!saveChanges) {
+      return undefined
+    }
+
+    const interval = setInterval(() => {
+      if (hasPendingChanges && !isSaving) {
+        const result = saveChanges('autosave')
+        if (result && typeof result.then === 'function') {
+          result.catch((error) => {
+            console.error('Autosave failed:', error)
+          })
+        }
+      }
+    }, 30000)
+
+    return () => {
+      clearInterval(interval)
+    }
+  }, [saveChanges, hasPendingChanges, isSaving])
 
   const handleThemeToggle = useCallback(() => {
     setTheme((current) => (current === 'light' ? 'dark' : 'light'))
@@ -892,6 +941,25 @@ function App() {
                 {onlineCount}
               </button>
               <div className="user-tray__panel">
+                <div className="save-controls" aria-live="polite">
+                  <button
+                    type="button"
+                    className="save-controls__button"
+                    onClick={handleManualSave}
+                    disabled={!hasPendingChanges && !isSaving}
+                  >
+                    {isSaving ? 'Saving…' : hasPendingChanges ? 'Save changes' : 'Save'}
+                  </button>
+                  <span className="save-controls__status">
+                    {isSaving
+                      ? 'Saving to shared canvas…'
+                      : hasPendingChanges
+                        ? 'Unsaved changes'
+                        : lastSavedLabel
+                          ? `Last saved ${lastSavedLabel}`
+                          : 'No changes yet'}
+                  </span>
+                </div>
                 <div className="presence-summary" aria-live="polite">
                   <span className="presence-summary__dot" />
                   <div className="presence-summary__text">

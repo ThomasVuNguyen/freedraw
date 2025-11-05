@@ -23,10 +23,12 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
   const [userIdentity, setUserIdentity] = useState(null)
   const [onlineUsers, setOnlineUsers] = useState([])
   const [isAdmin, setIsAdmin] = useState(false)
+  const [hasPendingChanges, setHasPendingChanges] = useState(false)
+  const [isSavingScene, setIsSavingScene] = useState(false)
+  const [lastSavedAt, setLastSavedAt] = useState(null)
   const presenceRefRef = useRef(null)
   const userIdRef = useRef(null)
   const isSyncingRef = useRef(false)
-  const lastUpdateRef = useRef(null)
   const hasLoadedInitialDataRef = useRef(false)
   const previousSceneRef = useRef(null)
   const sessionRefRef = useRef(null)
@@ -39,6 +41,7 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
   const isSavingRef = useRef(false)
   const lastSaveStartedAtRef = useRef(0)
   const needsResaveRef = useRef(false)
+  const flushPendingSaveRef = useRef(null)
 
   useEffect(() => {
     const presenceListRef = ref(database, PRESENCE_PATH)
@@ -242,7 +245,7 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
             // If there's a pending save (user just pasted/created something),
             // merge Firebase elements with local elements that don't exist in Firebase yet
             let elementsToRender = sceneData.elements
-            if (lastUpdateRef.current) {
+            if (hasPendingSaveRef.current) {
               // Get current elements from the canvas (includes pastes that haven't been processed yet)
               const currentCanvasElements = excalidrawAPI.getSceneElements()
               const firebaseIds = new Set(sceneData.elements.map(el => el.id))
@@ -292,17 +295,25 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
       })
 
       const flushPendingSave = (options = {}) => {
-        const { reason = 'debounce', allowRetry = true } = options
+        const { reason = 'manual', allowRetry = true } = options
+        const hasPending = hasPendingSaveRef.current || needsResaveRef.current
 
         if (import.meta.env?.DEV) {
-          console.log('flushPendingSave invoked', { reason, allowRetry })
+          console.log('flushPendingSave invoked', { reason, allowRetry, hasPending })
         }
 
         if (!excalidrawAPI) {
           console.warn('flushPendingSave aborted: excalidrawAPI not ready')
-          hasPendingSaveRef.current = false
-          lastUpdateRef.current = null
-          return
+          return null
+        }
+
+        if (!hasPending) {
+          if (!allowRetry) {
+            if (import.meta.env?.DEV) {
+              console.log('flushPendingSave skipped: nothing to save', { reason })
+            }
+            return null
+          }
         }
 
         if (isSavingRef.current || isApplyingSceneUpdateRef.current) {
@@ -315,20 +326,31 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
             if (isStuck) {
               console.warn('Previous Firebase save appears stuck; releasing lock')
               isSavingRef.current = false
+              setIsSavingScene(false)
+              hasPendingSaveRef.current = true
+              setHasPendingChanges(true)
             } else {
               needsResaveRef.current = true
-              return
+              return null
             }
           } else {
             needsResaveRef.current = true
-            return
+            return null
           }
         }
 
+        if (!hasPendingSaveRef.current && !needsResaveRef.current) {
+          if (import.meta.env?.DEV) {
+            console.log('flushPendingSave skipped after lock release', { reason })
+          }
+          return null
+        }
+
         isSavingRef.current = true
+        setIsSavingScene(true)
         lastSaveStartedAtRef.current = Date.now()
         hasPendingSaveRef.current = false
-        lastUpdateRef.current = null
+        setHasPendingChanges(false)
         needsResaveRef.current = false
 
         const sceneElements =
@@ -374,13 +396,17 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
         const savePromise = set(canvasRef, canvasData)
           .then(() => {
             console.log('Firebase save succeeded', { reason })
+            setLastSavedAt(Date.now())
           })
           .catch((error) => {
             console.error('Error syncing to Firebase:', error)
+            hasPendingSaveRef.current = true
+            setHasPendingChanges(true)
             throw error
           })
           .finally(() => {
             isSavingRef.current = false
+            setIsSavingScene(false)
             const shouldResave = needsResaveRef.current
             needsResaveRef.current = false
             if (shouldResave) {
@@ -393,6 +419,9 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
           if (isSavingRef.current && Date.now() - lastSaveStartedAtRef.current > 8000) {
             console.warn('Firebase save watchdog releasing lock after timeout')
             isSavingRef.current = false
+            setIsSavingScene(false)
+            hasPendingSaveRef.current = true
+            setHasPendingChanges(true)
             const shouldResave = needsResaveRef.current
             needsResaveRef.current = false
             if (shouldResave) {
@@ -402,16 +431,6 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
         }, 8000)
 
         return savePromise
-      }
-
-      const queueSave = (triggerReason) => {
-        if (lastUpdateRef.current) {
-          clearTimeout(lastUpdateRef.current)
-        }
-
-        lastUpdateRef.current = setTimeout(() => flushPendingSave({ reason: triggerReason }), 300)
-        hasPendingSaveRef.current = true
-        console.log('Queued canvas save to Firebase', { reason: triggerReason })
       }
 
       const handleVisibilityChange = () => {
@@ -448,14 +467,11 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
         })
 
         const authorizedElements = []
-        const seenIds = new Set()
-        let hasUnauthorizedChange = false
         const userIsAdmin = isAdminRef.current
 
         for (let index = 0; index < elements.length; index += 1) {
           const element = elements[index]
           const clonedElement = cloneElement(element)
-          seenIds.add(element.id)
 
           const prevEntry = previousMap.get(element.id)
 
@@ -470,61 +486,31 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
 
           if (userIsAdmin || !owner || owner === userId) {
             assignOwnerMetadata(clonedElement, owner ?? userId)
-            authorizedElements[index] = clonedElement
-            continue
-          }
-
-          const wasModified = JSON.stringify(previousElement) !== JSON.stringify(element)
-
-          if (wasModified) {
-            console.log(`Blocked modification to element ${element.id} owned by ${owner}`)
-            authorizedElements[index] = cloneElement(previousElement)
-            hasUnauthorizedChange = true
           } else {
-            authorizedElements[index] = cloneElement(previousElement)
-          }
-        }
-
-        for (const previousElement of previousElements) {
-          if (seenIds.has(previousElement.id)) {
-            continue
+            // Preserve original owner metadata while letting collaborators modify the element
+            assignOwnerMetadata(clonedElement, owner)
           }
 
-          const owner = previousElement.customData?.createdBy
-          if (!userIsAdmin && owner && owner !== userId) {
-            console.log(`Blocked deletion of element ${previousElement.id} owned by ${owner}`)
-            const insertIndex = previousMap.get(previousElement.id)?.index ?? authorizedElements.length
-            authorizedElements.splice(insertIndex, 0, cloneElement(previousElement))
-            hasUnauthorizedChange = true
-          }
+          authorizedElements[index] = clonedElement
         }
 
         previousSceneRef.current = cloneElements(authorizedElements)
-
-        if (hasUnauthorizedChange) {
-          isSyncingRef.current = true
-          isApplyingSceneUpdateRef.current = true
-          excalidrawAPI.updateScene({ elements: authorizedElements })
-          const releaseSyncFlag = () => {
-            isSyncingRef.current = false
-            isApplyingSceneUpdateRef.current = false
-          }
-          if (typeof requestAnimationFrame === 'function') {
-            requestAnimationFrame(releaseSyncFlag)
-          } else {
-            setTimeout(releaseSyncFlag, 0)
-          }
-        }
 
         lastAppStateRef.current = {
           viewBackgroundColor: appState.viewBackgroundColor,
           gridSize: appState.gridSize,
         }
 
-        queueSave('debounce')
+        hasPendingSaveRef.current = true
+        setHasPendingChanges(true)
+        if (isSavingRef.current) {
+          needsResaveRef.current = true
+        }
       }
 
       const unsubscribeChange = excalidrawAPI.onChange(handleChange)
+
+      flushPendingSaveRef.current = flushPendingSave
 
       return () => {
         if (heartbeatRef.current) {
@@ -542,11 +528,6 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
           sessionRefRef.current = null
         }
 
-        if (lastUpdateRef.current) {
-          clearTimeout(lastUpdateRef.current)
-          lastUpdateRef.current = null
-        }
-
         if (hasPendingSaveRef.current) {
           flushPendingSave({ reason: 'cleanup' })
         }
@@ -562,6 +543,8 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
         }
 
         set(presenceRef, null)
+
+        flushPendingSaveRef.current = null
       }
     }
 
@@ -663,5 +646,27 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
     return nextIdentity
   }, [])
 
-  return { isLoaded, userIdentity, onlineUsers, isAdmin, updateCursorPosition, updateUserProfile }
+  const saveChanges = useCallback((reason = 'manual') => {
+    const flush = flushPendingSaveRef.current
+    if (!flush) {
+      if (import.meta.env?.DEV) {
+        console.warn('saveChanges invoked before collaboration initialized', { reason })
+      }
+      return null
+    }
+    return flush({ reason, allowRetry: false })
+  }, [])
+
+  return {
+    isLoaded,
+    userIdentity,
+    onlineUsers,
+    isAdmin,
+    updateCursorPosition,
+    updateUserProfile,
+    saveChanges,
+    isSaving: isSavingScene,
+    hasPendingChanges,
+    lastSavedAt,
+  }
 }
