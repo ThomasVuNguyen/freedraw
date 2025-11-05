@@ -141,3 +141,45 @@
   background-position: 0 0, 0 4px, 4px -4px, -4px 0px;
   border-color: rgba(255, 255, 255, 0.2);
 }
+
+@media (max-width: 768px) {
+  .color-palette {
+    top: auto;
+    right: 50%;
+    transform: translateX(50%);
+    bottom: calc(env(safe-area-inset-bottom, 0) + 4.5rem);
+    flex-direction: row;
+    align-items: center;
+    gap: 0.75rem;
+    width: calc(100vw - 1.5rem);
+    max-width: 540px;
+    overflow-x: auto;
+    padding: 0.6rem 0.75rem;
+  }
+
+  .color-palette__header {
+    margin-bottom: 0;
+    width: auto;
+  }
+
+  .color-mode-toggle {
+    font-size: 0.65rem;
+    padding: 0.4rem 0.6rem;
+  }
+
+  .color-palette__swatches {
+    flex-direction: row;
+    gap: 0.5rem;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .color-palette__swatches::-webkit-scrollbar {
+    display: none;
+  }
+
+  .color-swatch {
+    width: 32px;
+    height: 32px;
+  }
+}

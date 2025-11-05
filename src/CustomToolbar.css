@@ -63,3 +63,41 @@
 .custom-toolbar__label {
   white-space: nowrap;
 }
+
+@media (max-width: 768px) {
+  .custom-toolbar {
+    top: auto;
+    right: auto;
+    bottom: calc(env(safe-area-inset-bottom, 0) + 0.75rem);
+    left: 50%;
+    transform: translateX(-50%);
+    flex-direction: row;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.5rem 0.65rem;
+    width: calc(100vw - 1.5rem);
+    max-width: 540px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .custom-toolbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .custom-toolbar__button {
+    flex-direction: column;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.5rem 0.6rem;
+    min-width: 64px;
+    font-size: 0.75rem;
+  }
+
+  .custom-toolbar__label {
+    white-space: normal;
+    text-align: center;
+    font-size: 0.65rem;
+    line-height: 1.1;
+  }
+}
