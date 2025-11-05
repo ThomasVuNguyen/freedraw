@@ -10,7 +10,6 @@ import {
   EyeSlash,
   ChartLineUp,
   MagnifyingGlass,
-  ArrowsClockwise,
 } from '@phosphor-icons/react'
 import '@excalidraw/excalidraw/index.css'
 
@@ -66,9 +65,7 @@ function App() {
     updateCursorPosition,
     updateUserProfile,
     saveChanges,
-    refreshCanvas,
     isSaving,
-    isRefreshing,
     hasPendingChanges,
     lastSyncInfo,
   } = useCollaboration(
@@ -90,15 +87,6 @@ function App() {
       })
     }
   }, [saveChanges])
-
-  const handleManualRefresh = useCallback(() => {
-    if (!refreshCanvas) {
-      return
-    }
-    refreshCanvas().catch((error) => {
-      console.error('Manual refresh failed:', error)
-    })
-  }, [refreshCanvas])
 
   useEffect(() => {
     if (!saveChanges) {
@@ -1049,16 +1037,6 @@ function App() {
             },
           }}
         />
-        <button
-          type="button"
-          className="refresh-button"
-          onClick={handleManualRefresh}
-          disabled={isRefreshing}
-          title="Pull latest updates from others"
-          aria-label="Refresh canvas"
-        >
-          <ArrowsClockwise size={20} weight={isRefreshing ? 'bold' : 'regular'} />
-        </button>
       </main>
       {remoteCursorElements}
       {hoveredOwner && (

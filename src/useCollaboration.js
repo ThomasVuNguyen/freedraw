@@ -1,14 +1,30 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { get, onDisconnect, onValue, push, ref, serverTimestamp, set, update } from 'firebase/database'
+import {
+  get,
+  onChildAdded,
+  onChildChanged,
+  onChildRemoved,
+  onDisconnect,
+  onValue,
+  push,
+  ref,
+  serverTimestamp,
+  set,
+  update,
+} from 'firebase/database'
 import { database } from './firebase'
 import { getOrCreateUserIdentity, updateStoredUserIdentity } from './userIdentity'
 
-const CANVAS_PATH = 'canvas/scene'
+const CANVAS_ROOT_PATH = 'canvas'
+const CANVAS_ELEMENTS_PATH = `${CANVAS_ROOT_PATH}/elements`
+const CANVAS_APP_STATE_PATH = `${CANVAS_ROOT_PATH}/appState`
+const CANVAS_FILES_PATH = `${CANVAS_ROOT_PATH}/files`
+const CANVAS_METADATA_PATH = `${CANVAS_ROOT_PATH}/metadata`
+const LEGACY_CANVAS_PATH = 'canvas/scene'
 const PRESENCE_PATH = 'presence/users'
 const SESSIONS_PATH = 'sessions'
 const ADMIN_PATH = 'roles/admins'
 const HEARTBEAT_INTERVAL = 20000
-const CANVAS_POLL_INTERVAL = 2000
 
 const cloneElement = (element) => {
   if (typeof structuredClone === 'function') {
@@ -19,6 +35,104 @@ const cloneElement = (element) => {
 
 const cloneElements = (elements = []) => elements.map((el) => cloneElement(el))
 
+const normalizeElementForCompare = (element) => {
+  if (!element) {
+    return null
+  }
+  const normalized = { ...element }
+  delete normalized.updated
+  return normalized
+}
+
+const elementsAreEqual = (a, b) => {
+  if (!a && !b) return true
+  if (!a || !b) return false
+  return JSON.stringify(normalizeElementForCompare(a)) === JSON.stringify(normalizeElementForCompare(b))
+}
+
+const sanitizeElement = (element) => {
+  if (!element || typeof element !== 'object') {
+    return null
+  }
+  if (typeof element.id !== 'string' || typeof element.type !== 'string') {
+    return null
+  }
+
+  const sanitized = { ...element }
+
+  sanitized.groupIds = Array.isArray(element.groupIds)
+    ? element.groupIds.filter((groupId) => typeof groupId === 'string')
+    : []
+
+  if (Array.isArray(element.boundElements)) {
+    sanitized.boundElements = element.boundElements.filter((binding) => {
+      if (!binding || typeof binding !== 'object') {
+        return false
+      }
+      const { id, type } = binding
+      return typeof id === 'string' && typeof type === 'string'
+    })
+  } else {
+    sanitized.boundElements = Array.isArray(element.boundElements) ? [] : null
+  }
+
+  if (typeof element.width !== 'number' || Number.isNaN(element.width)) {
+    sanitized.width = 0
+  }
+  if (typeof element.height !== 'number' || Number.isNaN(element.height)) {
+    sanitized.height = 0
+  }
+  if (typeof element.x !== 'number' || Number.isNaN(element.x)) {
+    sanitized.x = 0
+  }
+  if (typeof element.y !== 'number' || Number.isNaN(element.y)) {
+    sanitized.y = 0
+  }
+
+  if (typeof element.angle !== 'number' || Number.isNaN(element.angle)) {
+    sanitized.angle = 0
+  }
+
+  const needsPoints = element.type === 'line' || element.type === 'arrow' || element.type === 'freedraw'
+  const rawPoints = Array.isArray(element.points) ? element.points : needsPoints ? [] : undefined
+
+  if (needsPoints) {
+    const normalizedPoints = (rawPoints || []).map((point) => {
+      if (!Array.isArray(point)) {
+        return null
+      }
+      const [x = 0, y = 0] = point
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        return null
+      }
+      return [x, y]
+    }).filter(Boolean)
+
+    sanitized.points = normalizedPoints.length > 0 ? normalizedPoints : [[0, 0], [sanitized.width, sanitized.height]]
+  } else if (rawPoints) {
+    sanitized.points = rawPoints.filter((point) => Array.isArray(point))
+  } else if ('points' in sanitized) {
+    delete sanitized.points
+  }
+
+  return sanitized
+}
+
+const normalizeFileForCompare = (file) => {
+  if (!file) {
+    return null
+  }
+  const normalized = { ...file }
+  delete normalized.lastRetrieved
+  return normalized
+}
+
+const filesAreEqual = (a, b) => {
+  if (!a && !b) return true
+  if (!a || !b) return false
+  return JSON.stringify(normalizeFileForCompare(a)) === JSON.stringify(normalizeFileForCompare(b))
+}
+
 export function useCollaboration(excalidrawAPI, pendingFilesRef) {
   const [isLoaded, setIsLoaded] = useState(false)
   const [userIdentity, setUserIdentity] = useState(null)
@@ -28,10 +142,9 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
   const [isSavingScene, setIsSavingScene] = useState(false)
   const [lastSavedAt, setLastSavedAt] = useState(null)
   const [lastSyncInfo, setLastSyncInfo] = useState(null)
+
   const presenceRefRef = useRef(null)
   const userIdRef = useRef(null)
-  const isSyncingRef = useRef(false)
-  const hasLoadedInitialDataRef = useRef(false)
   const previousSceneRef = useRef(null)
   const sessionRefRef = useRef(null)
   const heartbeatRef = useRef(null)
@@ -44,16 +157,21 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
   const lastSaveStartedAtRef = useRef(0)
   const needsResaveRef = useRef(false)
   const flushPendingSaveRef = useRef(null)
-  const canvasPollRef = useRef(null)
-  const isFetchingCanvasRef = useRef(false)
   const debounceSaveTimerRef = useRef(null)
+  const elementsStateRef = useRef(new Map())
+  const filesStateRef = useRef({})
+  const appStateStateRef = useRef({})
+  const canvasListenersCleanupRef = useRef([])
+  const pendingSceneRenderRef = useRef(null)
+  const loadCanvasRef = useRef(null)
 
   useEffect(() => {
     const presenceListRef = ref(database, PRESENCE_PATH)
-    const unsubscribePresence = onValue(presenceListRef, (snapshot) => {
-      const presenceData = snapshot.val() || {}
+    const presenceMap = {}
+
+    const emitPresence = () => {
       const now = Date.now()
-      const users = Object.values(presenceData)
+      const users = Object.values(presenceMap)
         .filter(Boolean)
         .map((user) => {
           if (user.cursor) {
@@ -67,16 +185,35 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
           }
           return user
         })
-      users.sort((a, b) => {
-        const aJoined = a.joinedAt || 0
-        const bJoined = b.joinedAt || 0
-        return bJoined - aJoined
-      })
+        .sort((a, b) => {
+          const aJoined = a.joinedAt || 0
+          const bJoined = b.joinedAt || 0
+          return bJoined - aJoined
+        })
       setOnlineUsers(users)
-    })
+    }
+
+    const unsubscribes = [
+      onChildAdded(presenceListRef, (snapshot) => {
+        presenceMap[snapshot.key] = snapshot.val()
+        emitPresence()
+      }),
+      onChildChanged(presenceListRef, (snapshot) => {
+        presenceMap[snapshot.key] = snapshot.val()
+        emitPresence()
+      }),
+      onChildRemoved(presenceListRef, (snapshot) => {
+        delete presenceMap[snapshot.key]
+        emitPresence()
+      }),
+    ]
 
     return () => {
-      unsubscribePresence()
+      unsubscribes.forEach((unsubscribe) => {
+        if (typeof unsubscribe === 'function') {
+          unsubscribe()
+        }
+      })
     }
   }, [])
 
@@ -110,21 +247,280 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
   useEffect(() => {
     if (!excalidrawAPI) return
 
-    // Initialize user identity
+    let isUnmounted = false
+
+    const markSyncComplete = (reason = 'realtime', hadRemoteUpdates = false) => {
+      setLastSyncInfo({
+        reason,
+        hadRemoteUpdates,
+        timestamp: Date.now(),
+      })
+    }
+
+    const applyScene = (reason = 'realtime', hadRemoteUpdates = true) => {
+      if (!excalidrawAPI || isUnmounted) {
+        return
+      }
+
+      const sortedElements = Array.from(elementsStateRef.current.values()).sort(
+        (a, b) => (a?.order ?? 0) - (b?.order ?? 0)
+      )
+      const sanitizedElements = sortedElements
+        .map((element) => sanitizeElement(element))
+        .filter(Boolean)
+      const elements = cloneElements(sanitizedElements)
+      const appState = {
+        viewBackgroundColor: appStateStateRef.current?.viewBackgroundColor ?? '#ffffff',
+        gridSize: appStateStateRef.current?.gridSize ?? null,
+      }
+      const files = { ...(filesStateRef.current || {}) }
+
+      try {
+        isApplyingSceneUpdateRef.current = true
+        excalidrawAPI.updateScene({
+          elements,
+          appState,
+          files,
+        })
+        previousSceneRef.current = cloneElements(elements)
+        lastAppStateRef.current = { ...appState }
+        markSyncComplete(reason, hadRemoteUpdates)
+        setIsLoaded(true)
+      } catch (error) {
+        console.error('Error applying canvas update:', error)
+      } finally {
+        setTimeout(() => {
+          isApplyingSceneUpdateRef.current = false
+        }, 0)
+      }
+    }
+
+    const scheduleSceneRender = (reason = 'realtime', hadRemoteUpdates = true) => {
+      const pending = pendingSceneRenderRef.current
+      if (pending) {
+        pending.reason = reason
+        pending.hadRemoteUpdates = pending.hadRemoteUpdates || hadRemoteUpdates
+        return
+      }
+
+      pendingSceneRenderRef.current = { reason, hadRemoteUpdates }
+      Promise.resolve().then(() => {
+        const payload = pendingSceneRenderRef.current
+        pendingSceneRenderRef.current = null
+        if (!payload || isUnmounted) {
+          return
+        }
+        applyScene(payload.reason, payload.hadRemoteUpdates)
+      })
+    }
+
+    const hydrateLocalState = (
+      elements = [],
+      appState = {},
+      files = {},
+      reason = 'realtime',
+      hadRemoteUpdates = true
+    ) => {
+      const elementsMap = new Map()
+      elements
+        .map((element, index) => {
+          const sanitized = sanitizeElement({ ...element, order: element.order ?? index })
+          if (!sanitized) {
+            return null
+          }
+          return { ...sanitized, order: sanitized.order ?? index }
+        })
+        .filter(Boolean)
+        .forEach((element) => {
+          elementsMap.set(element.id, element)
+        })
+
+      elementsStateRef.current = elementsMap
+      filesStateRef.current = { ...files }
+      appStateStateRef.current = {
+        viewBackgroundColor: appState?.viewBackgroundColor ?? '#ffffff',
+        gridSize: appState?.gridSize ?? null,
+      }
+      previousSceneRef.current = cloneElements(Array.from(elementsMap.values()))
+      lastAppStateRef.current = { ...appStateStateRef.current }
+
+      scheduleSceneRender(reason, hadRemoteUpdates)
+    }
+
+    const migrateLegacyCanvasSnapshot = async (legacyData, userId) => {
+      let sceneData = {}
+      try {
+        sceneData = JSON.parse(legacyData.sceneJSON || '{}')
+      } catch (error) {
+        console.error('Failed to parse legacy scene JSON:', error)
+      }
+
+      let filesData = {}
+      try {
+        filesData = legacyData.files ? JSON.parse(legacyData.files) : {}
+      } catch (error) {
+        console.error('Failed to parse legacy files JSON:', error)
+      }
+
+      const elements = (sceneData.elements || []).map((element, index) => ({
+        ...element,
+        order: element.order ?? index,
+      }))
+
+      const appState = {
+        viewBackgroundColor: sceneData.appState?.viewBackgroundColor ?? '#ffffff',
+        gridSize: sceneData.appState?.gridSize ?? null,
+      }
+
+      const updates = {}
+
+      elements.forEach((element) => {
+        updates[`${CANVAS_ELEMENTS_PATH}/${element.id}`] = element
+      })
+
+      Object.entries(filesData).forEach(([fileId, fileValue]) => {
+        updates[`${CANVAS_FILES_PATH}/${fileId}`] = fileValue
+      })
+
+      updates[CANVAS_APP_STATE_PATH] = appState
+      updates[CANVAS_METADATA_PATH] = {
+        migratedAt: Date.now(),
+        migratedBy: userId,
+        updatedAt: Date.now(),
+        updatedBy: userId,
+      }
+      updates[LEGACY_CANVAS_PATH] = null
+
+      await update(ref(database), updates)
+
+      return {
+        elements,
+        appState,
+        files: filesData,
+      }
+    }
+
+    const loadInitialCanvas = async (userId, reason = 'initial') => {
+      const canvasRootRef = ref(database, CANVAS_ROOT_PATH)
+      const snapshot = await get(canvasRootRef)
+
+      if (!snapshot.exists()) {
+        elementsStateRef.current = new Map()
+        filesStateRef.current = {}
+        appStateStateRef.current = {}
+        previousSceneRef.current = []
+        lastAppStateRef.current = null
+        markSyncComplete(reason, false)
+        setIsLoaded(true)
+        return
+      }
+
+      const data = snapshot.val() || {}
+
+      if (data.sceneJSON) {
+        const migrated = await migrateLegacyCanvasSnapshot(data, userId)
+        hydrateLocalState(migrated.elements, migrated.appState, migrated.files, reason, true)
+      } else {
+        const elements = Object.values(data.elements || {})
+        const appState = data.appState || {}
+        const files = data.files || {}
+        hydrateLocalState(elements, appState, files, reason, true)
+      }
+    }
+
+    const detachCanvasListeners = () => {
+      canvasListenersCleanupRef.current.forEach((unsubscribe) => {
+        if (typeof unsubscribe === 'function') {
+          unsubscribe()
+        }
+      })
+      canvasListenersCleanupRef.current = []
+    }
+
+    const attachCanvasListeners = () => {
+      detachCanvasListeners()
+
+      const unsubscribes = []
+
+      const elementsRef = ref(database, CANVAS_ELEMENTS_PATH)
+      const handleElementUpsert = (snapshot) => {
+        const element = sanitizeElement(snapshot.val())
+        if (!element) {
+          return
+        }
+        const order = element.order ?? 0
+        elementsStateRef.current.set(snapshot.key, { ...element, order })
+        scheduleSceneRender('realtime', true)
+      }
+
+      unsubscribes.push(onChildAdded(elementsRef, handleElementUpsert))
+      unsubscribes.push(onChildChanged(elementsRef, handleElementUpsert))
+      unsubscribes.push(
+        onChildRemoved(elementsRef, (snapshot) => {
+          elementsStateRef.current.delete(snapshot.key)
+          scheduleSceneRender('realtime', true)
+        })
+      )
+
+      const filesRef = ref(database, CANVAS_FILES_PATH)
+      const handleFileUpsert = (snapshot) => {
+        filesStateRef.current = {
+          ...filesStateRef.current,
+          [snapshot.key]: snapshot.val(),
+        }
+        scheduleSceneRender('realtime', true)
+      }
+
+      unsubscribes.push(onChildAdded(filesRef, handleFileUpsert))
+      unsubscribes.push(onChildChanged(filesRef, handleFileUpsert))
+      unsubscribes.push(
+        onChildRemoved(filesRef, (snapshot) => {
+          const next = { ...filesStateRef.current }
+          delete next[snapshot.key]
+          filesStateRef.current = next
+          scheduleSceneRender('realtime', true)
+        })
+      )
+
+      const appStateRef = ref(database, CANVAS_APP_STATE_PATH)
+      unsubscribes.push(
+        onValue(appStateRef, (snapshot) => {
+          const data = snapshot.val() || {}
+          appStateStateRef.current = {
+            viewBackgroundColor: data.viewBackgroundColor ?? '#ffffff',
+            gridSize: data.gridSize ?? null,
+          }
+          scheduleSceneRender('realtime', true)
+        })
+      )
+
+      canvasListenersCleanupRef.current = unsubscribes
+    }
+
+    loadCanvasRef.current = async () => {
+      const userId = userIdRef.current
+      if (!userId) {
+        return
+      }
+      await loadInitialCanvas(userId, 'manual-refresh')
+    }
+
     const initializeIdentity = async () => {
-      // Get or create user identity with username and color from API
       const identity = await getOrCreateUserIdentity()
+      if (isUnmounted) {
+        return null
+      }
       userIdRef.current = identity.browserId
       setUserIdentity(identity)
-
       return identity
     }
 
-    // Main initialization function
     const initialize = async () => {
       const identity = await initializeIdentity()
+      if (!identity) {
+        return () => {}
+      }
       const userId = identity.browserId
-      const canvasRef = ref(database, CANVAS_PATH)
       const presenceRef = ref(database, `${PRESENCE_PATH}/${userId}`)
       const sessionsListRef = ref(database, `${SESSIONS_PATH}/${userId}`)
 
@@ -151,8 +547,11 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
         return element
       }
 
-      const decorateElementWithOwner = (element, ownerId = userId) =>
-        assignOwnerMetadata(cloneElement(element), ownerId)
+      const decorateElementWithOwner = (element, ownerId = userId, orderIndex = 0) => {
+        const decorated = assignOwnerMetadata(cloneElement(element), ownerId)
+        decorated.order = orderIndex
+        return decorated
+      }
 
       const setupPresence = () => {
         const userPresence = {
@@ -213,180 +612,27 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
       sendHeartbeat()
       heartbeatRef.current = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL)
 
-      const markSyncComplete = (reason = 'poll', hadRemoteUpdates = false) => {
-        setLastSyncInfo({
-          reason,
-          hadRemoteUpdates,
-          timestamp: Date.now(),
-        })
-      }
+      await loadInitialCanvas(userId)
+      attachCanvasListeners()
 
-      const fetchCanvasState = async (reason = 'poll') => {
-        if (!excalidrawAPI) {
-          return
-        }
-
-        if (isFetchingCanvasRef.current) {
-          return
-        }
-
-        // Skip polling if user has pending changes (actively working)
-        // This prevents interrupting the user's workflow
-        if (reason === 'poll' && hasPendingSaveRef.current) {
-          console.log('Skipping poll: user has pending changes')
-          return
-        }
-
-        isFetchingCanvasRef.current = true
-
-        try {
-          const snapshot = await get(canvasRef)
-          const data = snapshot.exists() ? snapshot.val() : null
-
-          if (data && !isSyncingRef.current) {
-            try {
-              const sceneData = JSON.parse(data.sceneJSON)
-
-              console.log('Loading from Firebase:', {
-                elementCount: sceneData.elements?.length || 0,
-                fileCount: data.files ? Object.keys(JSON.parse(data.files)).length : 0,
-                reason,
-              })
-
-              isSyncingRef.current = true
-              isApplyingSceneUpdateRef.current = true
-
-              let filesToLoad = null
-              if (data.files) {
-                try {
-                  const files = JSON.parse(data.files)
-                  if (Object.keys(files).length > 0) {
-                    filesToLoad = files
-                    if (pendingFilesRef) {
-                      pendingFilesRef.current = {
-                        ...pendingFilesRef.current,
-                        ...files,
-                      }
-                    }
-                    console.log('Files loaded from Firebase:', Object.keys(files).length)
-                  }
-                } catch (error) {
-                  console.error('Error parsing files:', error)
-                }
-              }
-
-              // If there's a pending save, intelligently merge Firebase and local elements
-              let elementsToRender = sceneData.elements
-              if (hasPendingSaveRef.current) {
-                const currentCanvasElements = excalidrawAPI.getSceneElements()
-                const firebaseMap = new Map(sceneData.elements.map(el => [el.id, el]))
-                const mergedElements = []
-
-                // First, add all Firebase elements, but prefer local version if newer
-                for (const fbElement of sceneData.elements) {
-                  const localElement = currentCanvasElements.find(el => el.id === fbElement.id)
-                  if (localElement && localElement.version > fbElement.version) {
-                    // Local version is newer, keep it
-                    mergedElements.push(localElement)
-                  } else {
-                    // Firebase version is newer or same, use it
-                    mergedElements.push(fbElement)
-                  }
-                }
-
-                // Then add any local-only elements (new elements not yet in Firebase)
-                const localOnlyElements = currentCanvasElements.filter(el => !firebaseMap.has(el.id))
-                if (localOnlyElements.length > 0) {
-                  console.log(`Preserving ${localOnlyElements.length} local-only element(s) during sync`)
-                  const taggedLocalElements = localOnlyElements.map(el => decorateElementWithOwner(el))
-                  mergedElements.push(...taggedLocalElements)
-                }
-
-                elementsToRender = mergedElements
-              }
-
-              const updateData = filesToLoad
-                ? { elements: elementsToRender, appState: sceneData.appState, files: filesToLoad }
-                : { elements: elementsToRender, appState: sceneData.appState }
-
-              excalidrawAPI.updateScene(updateData)
-
-              previousSceneRef.current = cloneElements(elementsToRender)
-
-              markSyncComplete(reason, true)
-
-              setTimeout(() => {
-                isSyncingRef.current = false
-                isApplyingSceneUpdateRef.current = false
-              }, 500)
-
-              if (!isLoaded) {
-                setIsLoaded(true)
-              }
-
-              hasLoadedInitialDataRef.current = true
-            } catch (error) {
-              console.error('Error loading canvas from Firebase:', error)
-              hasLoadedInitialDataRef.current = true
-              isSyncingRef.current = false
-              isApplyingSceneUpdateRef.current = false
-            }
-          } else if (!data) {
-            if (!isLoaded) {
-              setIsLoaded(true)
-            }
-            markSyncComplete(reason, false)
-            hasLoadedInitialDataRef.current = true
-          }
-        } catch (error) {
-          console.error('Error fetching canvas from Firebase:', error)
-        } finally {
-          isFetchingCanvasRef.current = false
-        }
-      }
-
-      // Load canvas immediately, then poll every 10 seconds
-      await fetchCanvasState('initial')
-
-      if (!canvasPollRef.current) {
-        canvasPollRef.current = setInterval(() => {
-          fetchCanvasState('poll').catch((error) => {
-            console.error('Canvas poll failed:', error)
-          })
-        }, CANVAS_POLL_INTERVAL)
-      }
-
-      const flushPendingSave = (options = {}) => {
+      const flushPendingSave = async (options = {}) => {
         const { reason = 'manual', allowRetry = true } = options
-        const hasPending = hasPendingSaveRef.current || needsResaveRef.current
-
-        if (import.meta.env?.DEV) {
-          console.log('flushPendingSave invoked', { reason, allowRetry, hasPending })
-        }
-
         if (!excalidrawAPI) {
           console.warn('flushPendingSave aborted: excalidrawAPI not ready')
           return null
         }
 
-        if (!hasPending) {
-          if (!allowRetry) {
-            if (import.meta.env?.DEV) {
-              console.log('flushPendingSave skipped: nothing to save', { reason })
-            }
-            return null
-          }
+        const hasPending = hasPendingSaveRef.current || needsResaveRef.current
+        if (!hasPending && !allowRetry) {
+          return null
         }
 
         if (isSavingRef.current || isApplyingSceneUpdateRef.current) {
           if (isSavingRef.current) {
-            const now = Date.now()
-            const lastStarted = lastSaveStartedAtRef.current || 0
-            const elapsed = now - lastStarted
+            const elapsed = Date.now() - (lastSaveStartedAtRef.current || 0)
             const isStuck = elapsed > 5000
-
             if (isStuck) {
-              console.warn('Previous Firebase save appears stuck; releasing lock')
+              console.warn('Previous save stuck; clearing lock')
               isSavingRef.current = false
               setIsSavingScene(false)
               hasPendingSaveRef.current = true
@@ -402,13 +648,9 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
         }
 
         if (!hasPendingSaveRef.current && !needsResaveRef.current) {
-          if (import.meta.env?.DEV) {
-            console.log('flushPendingSave skipped after lock release', { reason })
-          }
           return null
         }
 
-        // Clear any pending debounced save timer since we're saving now
         if (debounceSaveTimerRef.current) {
           clearTimeout(debounceSaveTimerRef.current)
           debounceSaveTimerRef.current = null
@@ -421,60 +663,116 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
         setHasPendingChanges(false)
         needsResaveRef.current = false
 
-        const sceneElements =
+        const authorizedElements =
           (previousSceneRef.current && cloneElements(previousSceneRef.current)) ||
           cloneElements(excalidrawAPI.getSceneElements())
+
+        const remoteElementsMap = elementsStateRef.current
+        const updates = {}
+        const nextElementsMap = new Map(remoteElementsMap)
+        const desiredElements = []
+
+        authorizedElements
+          .filter(Boolean)
+          .forEach((element, index) => {
+            const ownerId = element.customData?.createdBy || userId
+            const decorated = sanitizeElement(decorateElementWithOwner(element, ownerId, index))
+            if (!decorated) {
+              return
+            }
+            desiredElements.push(decorated)
+            const remoteElement = remoteElementsMap.get(decorated.id)
+            if (!elementsAreEqual(remoteElement, decorated)) {
+              updates[`${CANVAS_ELEMENTS_PATH}/${decorated.id}`] = decorated
+              nextElementsMap.set(decorated.id, decorated)
+            }
+          })
+
+        const desiredIds = new Set(desiredElements.map((element) => element.id))
+
+        remoteElementsMap.forEach((remoteElement, id) => {
+          if (!desiredIds.has(id)) {
+            updates[`${CANVAS_ELEMENTS_PATH}/${id}`] = null
+            nextElementsMap.delete(id)
+          }
+        })
 
         const latestAppState =
           lastAppStateRef.current ||
           excalidrawAPI.getAppState() ||
           {}
 
-        const sceneData = {
-          elements: sceneElements,
-          appState: {
-            viewBackgroundColor: latestAppState.viewBackgroundColor,
-            gridSize: latestAppState.gridSize,
-          },
+        const normalizedAppState = {
+          viewBackgroundColor: latestAppState.viewBackgroundColor,
+          gridSize: latestAppState.gridSize,
         }
 
-        const files = excalidrawAPI.getFiles()
-        const allFiles = {
-          ...files,
-          ...(pendingFilesRef?.current || {}),
+        const appStateChanged =
+          (appStateStateRef.current?.viewBackgroundColor ?? null) !==
+            normalizedAppState.viewBackgroundColor ||
+          (appStateStateRef.current?.gridSize ?? null) !== normalizedAppState.gridSize
+
+        if (appStateChanged) {
+          updates[CANVAS_APP_STATE_PATH] = normalizedAppState
+          appStateStateRef.current = normalizedAppState
         }
 
-        const sceneJSON = JSON.stringify(sceneData)
-        const filesJSON = JSON.stringify(allFiles)
-
-        const canvasData = {
-          sceneJSON,
-          files: filesJSON,
-          updatedBy: userId,
-          updatedAt: Date.now(),
+        const currentFiles = excalidrawAPI.getFiles()
+        const pendingFiles = pendingFilesRef?.current || {}
+        const mergedFiles = {
+          ...currentFiles,
+          ...pendingFiles,
         }
 
-        console.log('Saving to Firebase:', {
-          elementCount: sceneData.elements.length,
-          fileCount: Object.keys(allFiles).length,
-          sizeKB: (sceneJSON.length / 1024).toFixed(2),
-          reason,
+        const nextFiles = { ...filesStateRef.current }
+        let hadFileUpdates = false
+
+        Object.entries(mergedFiles).forEach(([fileId, fileValue]) => {
+          const normalized = normalizeFileForCompare(fileValue)
+          const previous = normalizeFileForCompare(filesStateRef.current[fileId])
+          if (!filesAreEqual(previous, normalized)) {
+            updates[`${CANVAS_FILES_PATH}/${fileId}`] = fileValue
+            nextFiles[fileId] = fileValue
+            hadFileUpdates = true
+          }
         })
 
-        const savePromise = set(canvasRef, canvasData)
-          .then(() => {
-            console.log('Firebase save succeeded', { reason })
-            setLastSavedAt(Date.now())
+        Object.keys(filesStateRef.current).forEach((fileId) => {
+          if (!mergedFiles[fileId]) {
+            updates[`${CANVAS_FILES_PATH}/${fileId}`] = null
+            delete nextFiles[fileId]
+            hadFileUpdates = true
+          }
+        })
 
-            // After save completes, if no more pending changes, fetch latest from others
-            setTimeout(() => {
-              if (!hasPendingSaveRef.current && !isSavingRef.current) {
-                console.log('Save complete and idle - fetching latest updates')
-                fetchCanvasState('post-save').catch((error) => {
-                  console.error('Post-save fetch failed:', error)
-                })
-              }
-            }, 100)
+        if (Object.keys(updates).length === 0) {
+          isSavingRef.current = false
+          setIsSavingScene(false)
+          markSyncComplete(reason, false)
+          return null
+        }
+
+        updates[CANVAS_METADATA_PATH] = {
+          updatedAt: Date.now(),
+          updatedBy: userId,
+        }
+
+        if (pendingFilesRef?.current && hadFileUpdates) {
+          pendingFilesRef.current = {}
+        }
+
+        const orderedDesiredElements = desiredElements
+          .slice()
+          .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+
+        const updatePromise = update(ref(database), updates)
+          .then(() => {
+            elementsStateRef.current = nextElementsMap
+            filesStateRef.current = nextFiles
+            previousSceneRef.current = cloneElements(orderedDesiredElements)
+            lastAppStateRef.current = { ...normalizedAppState }
+            setLastSavedAt(Date.now())
+            markSyncComplete(reason, true)
           })
           .catch((error) => {
             console.error('Error syncing to Firebase:', error)
@@ -492,7 +790,6 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
             }
           })
 
-        // Add a watchdog in case the promise gets hung (rare browser networking issues)
         setTimeout(() => {
           if (isSavingRef.current && Date.now() - lastSaveStartedAtRef.current > 8000) {
             console.warn('Firebase save watchdog releasing lock after timeout')
@@ -508,7 +805,7 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
           }
         }, 8000)
 
-        return savePromise
+        return updatePromise
       }
 
       const handleVisibilityChange = () => {
@@ -527,75 +824,82 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
       window.addEventListener('pagehide', handlePageHide)
       window.addEventListener('beforeunload', handlePageHide)
 
-      const handleChange = (elements, appState) => {
-        if (!hasLoadedInitialDataRef.current) {
-          console.log('handleChange ignored: initial data not loaded')
+      const cleanupCallbacks = [
+        () => window.removeEventListener('visibilitychange', handleVisibilityChange),
+        () => window.removeEventListener('pagehide', handlePageHide),
+        () => window.removeEventListener('beforeunload', handlePageHide),
+      ]
+
+      const handleChange = (elements, state, _files, info = {}) => {
+        const { source } = info
+        if (source === 'api') {
           return
         }
 
         if (isApplyingSceneUpdateRef.current) {
-          console.log('handleChange ignored: applying remote scene')
           return
         }
 
         const previousElements = previousSceneRef.current || []
-        const previousMap = new Map()
-        previousElements.forEach((el, index) => {
-          previousMap.set(el.id, { element: el, index })
-        })
-
-        const authorizedElements = []
+        const previousElementMap = new Map(previousElements.map((el) => [el.id, el]))
+        const authorizedElements = Array(elements.length)
+        const userId = userIdRef.current
         const userIsAdmin = isAdminRef.current
 
         for (let index = 0; index < elements.length; index += 1) {
           const element = elements[index]
-          const clonedElement = cloneElement(element)
+          if (!element) {
+            continue
+          }
 
-          const prevEntry = previousMap.get(element.id)
+          const clonedElement = cloneElement(element)
+          const prevEntry = previousElementMap.get(element.id)
 
           if (!prevEntry) {
-            // User is creating a new element
             assignOwnerMetadata(clonedElement, userId)
+            clonedElement.order = index
             authorizedElements[index] = clonedElement
             continue
           }
 
-          const previousElement = prevEntry.element
+          const previousElement = prevEntry
           const owner = previousElement.customData?.createdBy
 
           if (userIsAdmin || !owner || owner === userId) {
-            // User can edit their own elements or admin can edit anything
             assignOwnerMetadata(clonedElement, owner ?? userId)
+            clonedElement.order = index
             authorizedElements[index] = clonedElement
           } else {
-            // User tried to modify someone else's element
-            // Don't save the modification - use previous version in save
-            // Let it show locally, the next poll (2s) will restore correct version
-            console.log(`User ${userId} attempted to modify element ${element.id} owned by ${owner} - blocking save`)
-            assignOwnerMetadata(previousElement, owner)
-            authorizedElements[index] = previousElement  // Use old version for save
+            console.log(
+              `User ${userId} attempted to modify element ${element.id} owned by ${owner} - blocking save`
+            )
+            const preserved = cloneElement(previousElement)
+            preserved.order = index
+            authorizedElements[index] = preserved
           }
         }
 
-        // Check for deleted elements - prevent saving the deletion if not owned
-        const currentElementIds = new Set(elements.map(el => el.id))
+        const currentElementIds = new Set(elements.map((el) => el.id))
         for (const prevElement of previousElements) {
           if (!currentElementIds.has(prevElement.id) && !prevElement.isDeleted) {
             const owner = prevElement.customData?.createdBy
-            // If element was deleted and user doesn't own it, include it in save
             if (owner && owner !== userId && !userIsAdmin) {
-              console.log(`User ${userId} attempted to delete element ${prevElement.id} owned by ${owner} - blocking deletion from save`)
-              authorizedElements.push(prevElement)  // Keep in save
-              // Locally it will appear deleted, but poll will restore it in 2s
+              console.log(
+                `User ${userId} attempted to delete element ${prevElement.id} owned by ${owner} - blocking deletion from save`
+              )
+              const preserved = cloneElement(prevElement)
+              preserved.order = authorizedElements.length
+              authorizedElements.push(preserved)
             }
           }
         }
 
-        previousSceneRef.current = cloneElements(authorizedElements)
+        const sanitizedAuthorized = authorizedElements.filter(Boolean)
+        previousSceneRef.current = cloneElements(sanitizedAuthorized)
 
         lastAppStateRef.current = {
-          viewBackgroundColor: appState.viewBackgroundColor,
-          gridSize: appState.gridSize,
+          viewBackgroundColor: state.viewBackgroundColor,
+          gridSize: state.gridSize,
         }
 
         hasPendingSaveRef.current = true
@@ -604,18 +908,15 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
           needsResaveRef.current = true
         }
 
-        // Debounced save: trigger save 500ms after user stops editing
         if (debounceSaveTimerRef.current) {
           clearTimeout(debounceSaveTimerRef.current)
         }
         debounceSaveTimerRef.current = setTimeout(() => {
-          debounceSaveTimerRef.current = null // Clear timer so polling can resume
-          // Only trigger save if not already saving (prevents race with post-save)
+          debounceSaveTimerRef.current = null
           if (flushPendingSaveRef.current && hasPendingSaveRef.current && !isSavingRef.current) {
-            console.log('Triggering debounced save')
             flushPendingSaveRef.current({ reason: 'debounced', allowRetry: true })
           }
-        }, 500)
+        }, 750)
       }
 
       const unsubscribeChange = excalidrawAPI.onChange(handleChange)
@@ -623,16 +924,15 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
       flushPendingSaveRef.current = flushPendingSave
 
       return () => {
+        cleanupCallbacks.forEach((cb) => cb())
         if (heartbeatRef.current) {
           clearInterval(heartbeatRef.current)
           heartbeatRef.current = null
         }
-
         if (debounceSaveTimerRef.current) {
           clearTimeout(debounceSaveTimerRef.current)
           debounceSaveTimerRef.current = null
         }
-
         if (sessionRefRef.current) {
           update(sessionRefRef.current, {
             lastActiveAt: serverTimestamp(),
@@ -642,42 +942,39 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
           })
           sessionRefRef.current = null
         }
-
         if (hasPendingSaveRef.current) {
           flushPendingSave({ reason: 'cleanup' })
         }
-
-        window.removeEventListener('visibilitychange', handleVisibilityChange)
-        window.removeEventListener('pagehide', handlePageHide)
-        window.removeEventListener('beforeunload', handlePageHide)
-
-        presenceRefRef.current = null
-
-        if (canvasPollRef.current) {
-          clearInterval(canvasPollRef.current)
-          canvasPollRef.current = null
-        }
-
         if (unsubscribeChange) {
           unsubscribeChange()
         }
-
-        set(presenceRef, null)
-
+        if (presenceRefRef.current) {
+          set(presenceRefRef.current, null)
+          presenceRefRef.current = null
+        }
+        detachCanvasListeners()
         flushPendingSaveRef.current = null
+        return undefined
       }
     }
 
-    // Call the initialize function and handle cleanup
-    let cleanup
-    initialize().then((cleanupFn) => {
-      cleanup = cleanupFn
-    })
+    let cleanup = null
+    initialize()
+      .then((cleanupFn) => {
+        cleanup = cleanupFn
+      })
+      .catch((error) => {
+        console.error('Failed to initialize collaboration:', error)
+      })
 
     return () => {
-      if (cleanup) cleanup()
+      isUnmounted = true
+      if (cleanup) {
+        cleanup()
+      }
+      detachCanvasListeners()
     }
-  }, [excalidrawAPI, isLoaded, pendingFilesRef])
+  }, [excalidrawAPI, pendingFilesRef])
 
   const updateCursorPosition = useCallback((cursor) => {
     const presenceRef = presenceRefRef.current
@@ -787,43 +1084,17 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
 
     setIsRefreshing(true)
     try {
-      // Access fetchCanvasState through the ref we'll need to set up
-      const canvasRef = ref(database, CANVAS_PATH)
-      const snapshot = await get(canvasRef)
-
-      if (!excalidrawAPI) {
-        console.warn('Cannot refresh: Excalidraw API not initialized')
+      if (!loadCanvasRef.current) {
+        console.warn('Cannot refresh: collaboration not initialized')
         return
       }
-
-      const data = snapshot.exists() ? snapshot.val() : null
-      if (!data?.sceneJSON) {
-        console.log('No canvas data to refresh')
-        return
-      }
-
-      console.log('Manual refresh: pulling latest from database')
-
-      const sceneData = JSON.parse(data.sceneJSON)
-      const filesData = data.files ? JSON.parse(data.files) : {}
-
-      // Force update scene with latest data
-      excalidrawAPI.updateScene({
-        elements: sceneData.elements || [],
-        appState: sceneData.appState || {},
-        files: filesData,
-      })
-
-      console.log('Manual refresh complete', {
-        elementCount: sceneData.elements?.length || 0,
-        fileCount: Object.keys(filesData).length,
-      })
+      await loadCanvasRef.current()
     } catch (error) {
       console.error('Manual refresh failed:', error)
     } finally {
       setIsRefreshing(false)
     }
-  }, [excalidrawAPI, isRefreshing])
+  }, [isRefreshing])
 
   return {
     isLoaded,

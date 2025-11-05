@@ -1,13 +1,14 @@
 {
   "name": "arcadia",
   "private": true,
-  "version": "0.2.4",
+  "version": "0.3.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "deploy": "npm run build && firebase deploy --only hosting"
   },
   "dependencies": {
     "@excalidraw/excalidraw": "^0.18.0",
