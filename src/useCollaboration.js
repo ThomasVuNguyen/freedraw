@@ -230,6 +230,13 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
           return
         }
 
+        // Skip polling if user has pending changes (actively working)
+        // This prevents interrupting the user's workflow
+        if (reason === 'poll' && hasPendingSaveRef.current) {
+          console.log('Skipping poll: user has pending changes')
+          return
+        }
+
         isFetchingCanvasRef.current = true
 
         try {
@@ -458,6 +465,16 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
           .then(() => {
             console.log('Firebase save succeeded', { reason })
             setLastSavedAt(Date.now())
+
+            // After save completes, if no more pending changes, fetch latest from others
+            setTimeout(() => {
+              if (!hasPendingSaveRef.current && !isSavingRef.current) {
+                console.log('Save complete and idle - fetching latest updates')
+                fetchCanvasState('post-save').catch((error) => {
+                  console.error('Post-save fetch failed:', error)
+                })
+              }
+            }, 100)
           })
           .catch((error) => {
             console.error('Error syncing to Firebase:', error)
@@ -537,6 +554,7 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
           const prevEntry = previousMap.get(element.id)
 
           if (!prevEntry) {
+            // User is creating a new element
             assignOwnerMetadata(clonedElement, userId)
             authorizedElements[index] = clonedElement
             continue
@@ -550,21 +568,25 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
             assignOwnerMetadata(clonedElement, owner ?? userId)
             authorizedElements[index] = clonedElement
           } else {
-            // User tried to modify someone else's element - revert to previous version
-            console.log(`User ${userId} attempted to modify element ${element.id} owned by ${owner}`)
-            authorizedElements[index] = previousElement
+            // User tried to modify someone else's element
+            // Don't save the modification - use previous version in save
+            // Let it show locally, the next poll (2s) will restore correct version
+            console.log(`User ${userId} attempted to modify element ${element.id} owned by ${owner} - blocking save`)
+            assignOwnerMetadata(previousElement, owner)
+            authorizedElements[index] = previousElement  // Use old version for save
           }
         }
 
-        // Check for deleted elements - restore any that weren't owned by this user
+        // Check for deleted elements - prevent saving the deletion if not owned
         const currentElementIds = new Set(elements.map(el => el.id))
         for (const prevElement of previousElements) {
           if (!currentElementIds.has(prevElement.id) && !prevElement.isDeleted) {
             const owner = prevElement.customData?.createdBy
-            // If element was deleted and user doesn't own it and isn't admin, restore it
+            // If element was deleted and user doesn't own it, include it in save
             if (owner && owner !== userId && !userIsAdmin) {
-              console.log(`Restoring deleted element ${prevElement.id} owned by ${owner}`)
-              authorizedElements.push(prevElement)
+              console.log(`User ${userId} attempted to delete element ${prevElement.id} owned by ${owner} - blocking deletion from save`)
+              authorizedElements.push(prevElement)  // Keep in save
+              // Locally it will appear deleted, but poll will restore it in 2s
             }
           }
         }
@@ -755,6 +777,54 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
     return flush({ reason, allowRetry: false })
   }, [])
 
+  const [isRefreshing, setIsRefreshing] = useState(false)
+
+  const refreshCanvas = useCallback(async () => {
+    if (isRefreshing) {
+      console.log('Refresh already in progress')
+      return
+    }
+
+    setIsRefreshing(true)
+    try {
+      // Access fetchCanvasState through the ref we'll need to set up
+      const canvasRef = ref(database, CANVAS_PATH)
+      const snapshot = await get(canvasRef)
+
+      if (!excalidrawAPI) {
+        console.warn('Cannot refresh: Excalidraw API not initialized')
+        return
+      }
+
+      const data = snapshot.exists() ? snapshot.val() : null
+      if (!data?.sceneJSON) {
+        console.log('No canvas data to refresh')
+        return
+      }
+
+      console.log('Manual refresh: pulling latest from database')
+
+      const sceneData = JSON.parse(data.sceneJSON)
+      const filesData = data.files ? JSON.parse(data.files) : {}
+
+      // Force update scene with latest data
+      excalidrawAPI.updateScene({
+        elements: sceneData.elements || [],
+        appState: sceneData.appState || {},
+        files: filesData,
+      })
+
+      console.log('Manual refresh complete', {
+        elementCount: sceneData.elements?.length || 0,
+        fileCount: Object.keys(filesData).length,
+      })
+    } catch (error) {
+      console.error('Manual refresh failed:', error)
+    } finally {
+      setIsRefreshing(false)
+    }
+  }, [excalidrawAPI, isRefreshing])
+
   return {
     isLoaded,
     userIdentity,
@@ -763,7 +833,9 @@ export function useCollaboration(excalidrawAPI, pendingFilesRef) {
     updateCursorPosition,
     updateUserProfile,
     saveChanges,
+    refreshCanvas,
     isSaving: isSavingScene,
+    isRefreshing,
     hasPendingChanges,
     lastSavedAt,
     lastSyncInfo,
