@@ -11,6 +11,7 @@ import {
   ChartLineUp,
   MagnifyingGlass,
   ClockClockwise,
+  DiscordLogo,
 } from '@phosphor-icons/react'
 import '@excalidraw/excalidraw/index.css'
 
@@ -909,6 +910,15 @@ function App() {
             <span className="version-info">v{APP_VERSION}</span>
           </div>
         </button>
+        <a
+          href="https://discord.com/invite/kuzXr2Vh"
+          className="brand-discord-link"
+          target="_blank"
+          rel="noreferrer"
+        >
+          <DiscordLogo size={18} weight="fill" />
+          <span>Hang with us on Discord</span>
+        </a>
         <div
           id="brand-menu"
           className={`brand-menu${isMenuOpen ? ' brand-menu--open' : ''}`}
