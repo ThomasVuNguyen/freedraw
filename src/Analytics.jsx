@@ -280,7 +280,14 @@ function Analytics() {
     }))
 
     metrics.sessionsForCharts.forEach((s) => {
-      const hour = new Date(s.startedAt).getHours()
+      const startedAt = Number(s.startedAt)
+      if (!Number.isFinite(startedAt)) {
+        return
+      }
+      const hour = new Date(startedAt).getHours()
+      if (Number.isNaN(hour) || !hourlyActivity[hour]) {
+        return
+      }
       hourlyActivity[hour].sessions++
     })
 
