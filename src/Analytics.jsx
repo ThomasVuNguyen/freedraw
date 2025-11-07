@@ -63,6 +63,7 @@ function Analytics() {
     const weeklySessionsByUser = new Map()
     const userMetaMap = new Map()
     const userTimeStatsMap = new Map()
+    const dailyActiveMap = new Map()
 
     Object.entries(sessions).forEach(([userId, userSessions]) => {
       const sessionsArray = Object.entries(userSessions || {}).map(([sessionId, session]) => ({
@@ -90,6 +91,12 @@ function Analytics() {
         }
 
         if (startedAt > 0) {
+          const dayKey = new Date(startedAt).toISOString().slice(0, 10)
+          if (!dailyActiveMap.has(dayKey)) {
+            dailyActiveMap.set(dayKey, new Set())
+          }
+          dailyActiveMap.get(dayKey).add(userId)
+
           const duration = Math.max((session.endedAt || now) - startedAt, 0)
           const existing = userTimeStatsMap.get(userId) || {
             totalDuration: 0,
@@ -131,6 +138,8 @@ function Analytics() {
     const recentSessions = allSessions.filter((s) => s.startedAt >= oneDayAgo).length
 
     allSessions.sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0))
+    const sessionsForCharts = [...allSessions]
+    const recentSessionsList = allSessions.slice(0, 20)
 
     const dailyActiveUsers = dailyActiveSet.size
     const weeklyActiveUsers = weeklyActiveSet.size
@@ -176,6 +185,22 @@ function Analytics() {
     const returningRate7d = weeklyActiveUsers > 0 ? returningUsers7d / weeklyActiveUsers : 0
     const newUsers7d = Math.max(weeklyActiveUsers - returningUsers7d, 0)
 
+    const dailyActiveSeries = []
+    for (let i = 6; i >= 0; i--) {
+      const dayStart = now - i * DAY_IN_MS
+      const dayKey = new Date(dayStart).toISOString().slice(0, 10)
+      const dateLabel = new Date(dayStart).toLocaleDateString('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+      })
+      dailyActiveSeries.push({
+        date: dateLabel,
+        users: dailyActiveMap.get(dayKey)?.size || 0,
+      })
+    }
+    const totalMinutesSpent = totalTrackedTime / (60 * 1000)
+
     return {
       activeUsers,
       uniqueUsers,
@@ -195,8 +220,11 @@ function Analytics() {
       sessionsPerReturningUser7d,
       newUsers7d,
       totalTrackedTime,
+      totalMinutesSpent,
       userTimeStats: userTimeStatsWithShare,
-      allSessions: allSessions.slice(0, 20),
+      sessionsForCharts,
+      dailyActiveSeries,
+      allSessions: recentSessionsList,
       completedSessions,
       userSessionCounts: userSessionCounts.slice(0, 10),
     }
@@ -212,7 +240,7 @@ function Analytics() {
       const date = new Date(dayStart)
       const dayName = date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
 
-      const sessionsInDay = metrics.allSessions.filter(
+      const sessionsInDay = metrics.sessionsForCharts.filter(
         (s) => s.startedAt >= dayStart && s.startedAt < dayEnd
       ).length
 
@@ -251,7 +279,7 @@ function Analytics() {
       sessions: 0,
     }))
 
-    metrics.allSessions.forEach((s) => {
+    metrics.sessionsForCharts.forEach((s) => {
       const hour = new Date(s.startedAt).getHours()
       hourlyActivity[hour].sessions++
     })
@@ -267,6 +295,7 @@ function Analytics() {
       sessionsOverTime,
       durationData,
       hourlyActivity,
+      dailyActiveUsers: metrics.dailyActiveSeries,
       engagementFunnel,
       topUsers: metrics.userSessionCounts.map((u) => ({
         username: u.username,
@@ -354,6 +383,13 @@ function Analytics() {
           <div className="metric-value">{formatDuration(metrics.avgDuration)}</div>
           <div className="metric-label">Avg Session Time</div>
           <div className="metric-sublabel">Per completed session</div>
+        </div>
+
+        <div className="metric-card">
+          <div className="metric-icon">🧮</div>
+          <div className="metric-value">{Math.round(metrics.totalMinutesSpent).toLocaleString()}</div>
+          <div className="metric-label">Minutes Tracked</div>
+          <div className="metric-sublabel">Lifetime on canvas</div>
         </div>
 
         <div className="metric-card">
@@ -545,6 +581,28 @@ function Analytics() {
                 activeDot={{ r: 8 }}
               />
             </LineChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* Daily Active Users */}
+        <div className="chart-card">
+          <h3>🧍 Daily Active Users (Last 7 Days)</h3>
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={chartData.dailyActiveUsers}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+              <XAxis dataKey="date" stroke="rgba(255,255,255,0.7)" />
+              <YAxis stroke="rgba(255,255,255,0.7)" allowDecimals={false} />
+              <Tooltip
+                formatter={(value) => [`${value} users`, 'Users']}
+                contentStyle={{
+                  backgroundColor: 'rgba(0,0,0,0.8)',
+                  border: 'none',
+                  borderRadius: '8px',
+                }}
+              />
+              <Legend />
+              <Bar dataKey="users" fill="#fa709a" radius={[8, 8, 0, 0]} />
+            </BarChart>
           </ResponsiveContainer>
         </div>
 
