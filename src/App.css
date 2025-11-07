@@ -615,6 +615,11 @@
   transition: transform 0.16s ease, box-shadow 0.16s ease, opacity 0.16s ease;
 }
 
+.save-controls__button--secondary {
+  background: var(--color-coral);
+  color: #fff;
+}
+
 .save-controls__button:hover,
 .save-controls__button:focus-visible {
   transform: translateY(-1px);

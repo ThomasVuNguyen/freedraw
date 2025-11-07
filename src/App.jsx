@@ -1,7 +1,7 @@
 /* global __APP_VERSION__ */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Excalidraw } from '@excalidraw/excalidraw'
+import { Excalidraw, exportToBlob } from '@excalidraw/excalidraw'
 import {
   MoonStars,
   Sun,
@@ -10,6 +10,7 @@ import {
   EyeSlash,
   ChartLineUp,
   MagnifyingGlass,
+  ClockClockwise,
 } from '@phosphor-icons/react'
 import '@excalidraw/excalidraw/index.css'
 
@@ -19,6 +20,7 @@ import { handleImageUpload, uploadAvatarToStorage } from './imageHandler'
 import AvatarSetup from './AvatarSetup'
 import CustomToolbar from './CustomToolbar'
 import ColorPalette from './ColorPalette'
+import { saveCanvasSnapshot } from './canvasSnapshots'
 
 const APP_NAME = 'arcadia'
 
@@ -54,6 +56,7 @@ function App() {
   const [selectedBackgroundColor, setSelectedBackgroundColor] = useState('transparent')
   const [hasSelectedElements, setHasSelectedElements] = useState(false)
   const [colorMode, setColorMode] = useState('stroke') // 'stroke' or 'background'
+  const [isExportingCanvas, setIsExportingCanvas] = useState(false)
   const menuRef = useRef(null)
 
   // Enable real-time collaboration
@@ -87,6 +90,64 @@ function App() {
       })
     }
   }, [saveChanges])
+
+  const handleCanvasExport = useCallback(async () => {
+    if (!isAdmin) {
+      console.warn('Canvas export is restricted to admins.')
+      return
+    }
+
+    if (!excalidrawAPI || isExportingCanvas) {
+      return
+    }
+
+    setIsExportingCanvas(true)
+
+    try {
+      const elements =
+        excalidrawAPI
+          .getSceneElements()
+          ?.filter((element) => element && !element.isDeleted) ?? []
+
+      const appState = excalidrawAPI.getAppState() || {}
+      const files =
+        typeof excalidrawAPI.getFiles === 'function' ? excalidrawAPI.getFiles() : undefined
+
+      const blob = await exportToBlob({
+        elements,
+        appState: {
+          ...appState,
+          exportBackground: true,
+          viewBackgroundColor:
+            appState?.viewBackgroundColor || (theme === 'dark' ? '#212121' : '#F3F1E4'),
+        },
+        files,
+        mimeType: 'image/png',
+        exportPadding: 16,
+      })
+
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+      link.href = url
+      link.download = `${APP_NAME}-canvas-${timestamp}.png`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+
+      await saveCanvasSnapshot(blob, {
+        user: userIdentity,
+        appVersion: APP_VERSION,
+        theme,
+        elementsCount: elements.length,
+      })
+    } catch (error) {
+      console.error('Failed to export canvas:', error)
+    } finally {
+      setIsExportingCanvas(false)
+    }
+  }, [excalidrawAPI, isAdmin, isExportingCanvas, theme, userIdentity])
 
   useEffect(() => {
     if (!saveChanges) {
@@ -894,6 +955,14 @@ function App() {
               <ChartLineUp size={18} weight="regular" />
               <span>Open analytics</span>
             </a>
+            <a
+              href="/timeline"
+              className="brand-menu__item brand-menu__item--link"
+              onClick={closeMenu}
+            >
+              <ClockClockwise size={18} weight="regular" />
+              <span>View timeline</span>
+            </a>
           </div>
         </div>
       </div>
@@ -948,6 +1017,16 @@ function App() {
                   >
                     {isSaving ? 'Saving…' : hasPendingChanges ? 'Save changes' : 'Save'}
                   </button>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      className="save-controls__button save-controls__button--secondary"
+                      onClick={handleCanvasExport}
+                      disabled={!excalidrawAPI || isExportingCanvas}
+                    >
+                      {isExportingCanvas ? 'Exporting…' : 'Export image'}
+                    </button>
+                  )}
                 </div>
                 <div className="presence-summary" aria-live="polite">
                   <span className="presence-summary__dot" />

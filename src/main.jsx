@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import './index.css'
 import App from './App.jsx'
 import Analytics from './Analytics.jsx'
+import Timeline from './Timeline.jsx'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
@@ -11,6 +12,7 @@ createRoot(document.getElementById('root')).render(
       <Routes>
         <Route path="/" element={<App />} />
         <Route path="/analytics" element={<Analytics />} />
+        <Route path="/timeline" element={<Timeline />} />
       </Routes>
     </BrowserRouter>
   </StrictMode>,

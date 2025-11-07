@@ -21,6 +21,9 @@ import {
 import './Analytics.css'
 
 const COLORS = ['#667eea', '#764ba2', '#f093fb', '#4facfe', '#00f2fe', '#43e97b', '#fa709a']
+const DAY_IN_MS = 24 * 60 * 60 * 1000
+const WEEK_IN_MS = DAY_IN_MS * 7
+const MONTH_IN_MS = DAY_IN_MS * 30
 
 function Analytics() {
   const [sessions, setSessions] = useState({})
@@ -50,9 +53,17 @@ function Analytics() {
   const calculateMetrics = () => {
     const activeUsers = Object.values(presence).filter(Boolean).length
     const uniqueUsers = Object.keys(sessions).length
+    const now = Date.now()
 
     let allSessions = []
     let totalSessions = 0
+    const dailyActiveSet = new Set()
+    const weeklyActiveSet = new Set()
+    const monthlyActiveSet = new Set()
+    const weeklySessionsByUser = new Map()
+    const userMetaMap = new Map()
+    const userTimeStatsMap = new Map()
+
     Object.entries(sessions).forEach(([userId, userSessions]) => {
       const sessionsArray = Object.entries(userSessions || {}).map(([sessionId, session]) => ({
         ...session,
@@ -60,7 +71,39 @@ function Analytics() {
         userId,
         avatarUrl: session.avatarUrl || null,
       }))
-      allSessions = [...allSessions, ...sessionsArray]
+
+      if (sessionsArray[0]) {
+        userMetaMap.set(userId, sessionsArray[0])
+      }
+
+      sessionsArray.forEach((session) => {
+        const startedAt = session.startedAt || 0
+        if (startedAt >= now - DAY_IN_MS) {
+          dailyActiveSet.add(userId)
+        }
+        if (startedAt >= now - WEEK_IN_MS) {
+          weeklyActiveSet.add(userId)
+          weeklySessionsByUser.set(userId, (weeklySessionsByUser.get(userId) || 0) + 1)
+        }
+        if (startedAt >= now - MONTH_IN_MS) {
+          monthlyActiveSet.add(userId)
+        }
+
+        if (startedAt > 0) {
+          const duration = Math.max((session.endedAt || now) - startedAt, 0)
+          const existing = userTimeStatsMap.get(userId) || {
+            totalDuration: 0,
+            sessionCount: 0,
+            lastActive: 0,
+          }
+          existing.totalDuration += duration
+          existing.sessionCount += 1
+          existing.lastActive = Math.max(existing.lastActive, session.endedAt || session.startedAt || 0)
+          userTimeStatsMap.set(userId, existing)
+        }
+      })
+
+      allSessions.push(...sessionsArray)
       totalSessions += sessionsArray.length
     })
 
@@ -84,10 +127,54 @@ function Analytics() {
     userSessionCounts.sort((a, b) => b.count - a.count)
     const mostActiveUser = userSessionCounts[0] || null
 
-    const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000
+    const oneDayAgo = now - DAY_IN_MS
     const recentSessions = allSessions.filter((s) => s.startedAt >= oneDayAgo).length
 
     allSessions.sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0))
+
+    const dailyActiveUsers = dailyActiveSet.size
+    const weeklyActiveUsers = weeklyActiveSet.size
+    const monthlyActiveUsers = monthlyActiveSet.size
+
+    const weeklyCounts = Array.from(weeklySessionsByUser.values())
+    let returningUsers7d = 0
+    let returningSessionsTotal7d = 0
+    weeklyCounts.forEach((count) => {
+      if (count > 1) {
+        returningUsers7d += 1
+        returningSessionsTotal7d += count
+      }
+    })
+
+    const avgSessionsPerUser = uniqueUsers > 0 ? totalSessions / uniqueUsers : 0
+    const sessionsPerReturningUser7d = returningUsers7d > 0 ? returningSessionsTotal7d / returningUsers7d : 0
+
+    const userTimeStats = Array.from(userTimeStatsMap.entries()).map(([userId, data]) => {
+      const meta = userMetaMap.get(userId) || {}
+      const avgPerSession = data.sessionCount > 0 ? data.totalDuration / data.sessionCount : 0
+      return {
+        userId,
+        username: meta.username || 'Unknown',
+        color: meta.color || '#666',
+        avatarUrl: meta.avatarUrl || null,
+        totalDuration: data.totalDuration,
+        sessionCount: data.sessionCount,
+        avgDuration: avgPerSession,
+        lastActive: data.lastActive,
+      }
+    })
+
+    const totalTrackedTime = userTimeStats.reduce((sum, stat) => sum + stat.totalDuration, 0)
+    userTimeStats.sort((a, b) => b.totalDuration - a.totalDuration)
+    const userTimeStatsWithShare = userTimeStats.map((stat) => ({
+      ...stat,
+      share: totalTrackedTime > 0 ? stat.totalDuration / totalTrackedTime : 0,
+    }))
+
+    const stickinessRatio = monthlyActiveUsers > 0 ? dailyActiveUsers / monthlyActiveUsers : 0
+    const weeklyStickinessRatio = weeklyActiveUsers > 0 ? dailyActiveUsers / weeklyActiveUsers : 0
+    const returningRate7d = weeklyActiveUsers > 0 ? returningUsers7d / weeklyActiveUsers : 0
+    const newUsers7d = Math.max(weeklyActiveUsers - returningUsers7d, 0)
 
     return {
       activeUsers,
@@ -97,6 +184,18 @@ function Analytics() {
       avgDuration,
       mostActiveUser,
       recentSessions,
+      dailyActiveUsers,
+      weeklyActiveUsers,
+      monthlyActiveUsers,
+      stickinessRatio,
+      weeklyStickinessRatio,
+      returningUsers7d,
+      returningRate7d,
+      avgSessionsPerUser,
+      sessionsPerReturningUser7d,
+      newUsers7d,
+      totalTrackedTime,
+      userTimeStats: userTimeStatsWithShare,
       allSessions: allSessions.slice(0, 20),
       completedSessions,
       userSessionCounts: userSessionCounts.slice(0, 10),
@@ -157,10 +256,18 @@ function Analytics() {
       hourlyActivity[hour].sessions++
     })
 
+    const engagementFunnel = [
+      { label: 'Monthly Active', users: metrics.monthlyActiveUsers },
+      { label: 'Weekly Active', users: metrics.weeklyActiveUsers },
+      { label: 'Daily Active', users: metrics.dailyActiveUsers },
+      { label: 'Returning (7d)', users: metrics.returningUsers7d },
+    ]
+
     return {
       sessionsOverTime,
       durationData,
       hourlyActivity,
+      engagementFunnel,
       topUsers: metrics.userSessionCounts.map((u) => ({
         username: u.username,
         sessions: u.count,
@@ -183,6 +290,14 @@ function Analytics() {
     } else {
       return `${seconds}s`
     }
+  }
+
+  const formatPercent = (value, { fallback = '0%' } = {}) => {
+    if (!Number.isFinite(value) || value <= 0) {
+      return fallback
+    }
+    const precision = value < 0.1 ? 1 : 0
+    return `${(value * 100).toFixed(precision)}%`
   }
 
   const formatTimestamp = (timestamp) => {
@@ -279,6 +394,130 @@ function Analytics() {
         )}
       </div>
 
+      {/* Product Stickiness Metrics */}
+      <section className="stickiness-section">
+        <div className="stickiness-header">
+          <div>
+            <h2>🧲 Product Stickiness</h2>
+            <p>Rolling engagement signals for the last 30 days</p>
+          </div>
+          <div className="stickiness-highlight">
+            <span className="stickiness-value">{formatPercent(metrics.stickinessRatio)}</span>
+            <span className="stickiness-label">DAU / MAU</span>
+            <span className="stickiness-subtext">
+              {metrics.monthlyActiveUsers > 0
+                ? `${metrics.dailyActiveUsers} of ${metrics.monthlyActiveUsers} monthly actives were active today`
+                : 'No monthly activity yet'}
+            </span>
+          </div>
+        </div>
+
+        <div className="stickiness-grid">
+          <div className="metric-card">
+            <div className="metric-icon">📅</div>
+            <div className="metric-value">{metrics.dailyActiveUsers}</div>
+            <div className="metric-label">Daily Active Users</div>
+            <div className="metric-sublabel">Past 24 hours</div>
+          </div>
+
+          <div className="metric-card">
+            <div className="metric-icon">🗓️</div>
+            <div className="metric-value">{metrics.weeklyActiveUsers}</div>
+            <div className="metric-label">Weekly Active Users</div>
+            <div className="metric-sublabel">DAU / WAU {formatPercent(metrics.weeklyStickinessRatio)}</div>
+          </div>
+
+          <div className="metric-card">
+            <div className="metric-icon">🔁</div>
+            <div className="metric-value">{metrics.returningUsers7d}</div>
+            <div className="metric-label">Returning Users (7d)</div>
+            <div className="metric-sublabel">Return rate {formatPercent(metrics.returningRate7d)}</div>
+          </div>
+
+          <div className="metric-card">
+            <div className="metric-icon">✨</div>
+            <div className="metric-value">{metrics.newUsers7d}</div>
+            <div className="metric-label">New Users (7d)</div>
+            <div className="metric-sublabel">First-time collaborators</div>
+          </div>
+
+          <div className="metric-card">
+            <div className="metric-icon">📈</div>
+            <div className="metric-value">{metrics.avgSessionsPerUser.toFixed(1)}</div>
+            <div className="metric-label">Avg Sessions / User</div>
+            <div className="metric-sublabel">Lifetime average</div>
+          </div>
+
+          <div className="metric-card">
+            <div className="metric-icon">🧲</div>
+            <div className="metric-value">{metrics.sessionsPerReturningUser7d.toFixed(1)}</div>
+            <div className="metric-label">Sessions per Returner</div>
+            <div className="metric-sublabel">Last 7 days</div>
+          </div>
+        </div>
+      </section>
+
+      {/* User Time Spent Breakdown */}
+      <section className="time-spent-section">
+        <div className="time-spent-header">
+          <div>
+            <h2>⏳ Time Spent by User</h2>
+            <p>Includes completed sessions plus time from in-progress sessions</p>
+          </div>
+          <div className="time-spent-summary">
+            <span>Total tracked time</span>
+            <strong>{formatDuration(metrics.totalTrackedTime)}</strong>
+          </div>
+        </div>
+
+        {metrics.userTimeStats.length > 0 ? (
+          <div className="time-spent-table">
+            <div className="time-spent-row time-spent-row--head">
+              <div className="col-user">User</div>
+              <div className="col-total-time">Total Time</div>
+              <div className="col-session-count">Sessions</div>
+              <div className="col-avg-session">Avg Session</div>
+              <div className="col-time-share">Time Share</div>
+              <div className="col-last-active">Last Active</div>
+            </div>
+            {metrics.userTimeStats.map((stat) => (
+              <div key={stat.userId} className="time-spent-row">
+                <div className="col-user">
+                  <div
+                    className={`session-avatar${stat.avatarUrl ? ' session-avatar--image' : ''}`}
+                    style={{ backgroundColor: stat.color }}
+                  >
+                    {stat.avatarUrl ? (
+                      <img src={stat.avatarUrl} alt={`${stat.username || 'User'} avatar`} />
+                    ) : (
+                      stat.username?.charAt(0)?.toUpperCase() || '?'
+                    )}
+                  </div>
+                  <span>{stat.username || 'Unknown'}</span>
+                </div>
+                <div className="col-total-time">{formatDuration(stat.totalDuration)}</div>
+                <div className="col-session-count">{stat.sessionCount}</div>
+                <div className="col-avg-session">{formatDuration(stat.avgDuration)}</div>
+                <div className="col-time-share">
+                  <div className="time-share">
+                    <div className="time-share__value">{formatPercent(stat.share)}</div>
+                    <div className="time-share__bar">
+                      <div
+                        className="time-share__bar-fill"
+                        style={{ width: `${Math.min(stat.share * 100, 100).toFixed(0)}%` }}
+                      ></div>
+                    </div>
+                  </div>
+                </div>
+                <div className="col-last-active">{formatTimestamp(stat.lastActive)}</div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="empty-state">No time tracking data available yet</div>
+        )}
+      </section>
+
       {/* Charts Grid */}
       <div className="charts-grid">
         {/* Sessions Over Time */}
@@ -306,6 +545,28 @@ function Analytics() {
                 activeDot={{ r: 8 }}
               />
             </LineChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* Stickiness Breakdown */}
+        <div className="chart-card">
+          <h3>🧲 Active Users by Time Window</h3>
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={chartData.engagementFunnel}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+              <XAxis dataKey="label" stroke="rgba(255,255,255,0.7)" />
+              <YAxis stroke="rgba(255,255,255,0.7)" />
+              <Tooltip
+                formatter={(value) => [`${value} users`, 'Users']}
+                contentStyle={{
+                  backgroundColor: 'rgba(0,0,0,0.8)',
+                  border: 'none',
+                  borderRadius: '8px',
+                }}
+              />
+              <Legend />
+              <Bar dataKey="users" fill="#43e97b" radius={[8, 8, 0, 0]} />
+            </BarChart>
           </ResponsiveContainer>
         </div>
 
