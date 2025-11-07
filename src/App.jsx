@@ -155,8 +155,8 @@ function App() {
     [excalidrawAPI]
   )
 
-  const handleColorModeToggle = useCallback(() => {
-    setColorMode((prev) => (prev === 'stroke' ? 'background' : 'stroke'))
+  const handleColorModeChange = useCallback((mode) => {
+    setColorMode(mode)
   }, [])
 
   const handleColorSelect = useCallback(
@@ -909,7 +909,7 @@ function App() {
           selectedColor={colorMode === 'stroke' ? selectedColor : selectedBackgroundColor}
           onColorSelect={handleColorSelect}
           colorMode={colorMode}
-          onModeToggle={handleColorModeToggle}
+          onModeChange={handleColorModeChange}
           isDarkTheme={theme === 'dark'}
         />
       )}

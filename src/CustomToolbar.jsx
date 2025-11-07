@@ -1,6 +1,6 @@
 import {
   Cursor,
-  ImageSquare,
+  // ImageSquare,
   TextT,
   Square,
   Circle,
@@ -18,11 +18,11 @@ const TOOL_CONFIG = [
     label: 'Pointer',
     icon: Cursor,
   },
-  {
-    type: 'image',
-    label: 'Image',
-    icon: ImageSquare,
-  },
+  // {
+  //   type: 'image',
+  //   label: 'Image',
+  //   icon: ImageSquare,
+  // },
   {
     type: 'text',
     label: 'Text',
